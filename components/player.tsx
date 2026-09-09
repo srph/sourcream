@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Check, CircleHelp, Gauge, Maximize, Minimize, Pause, Play, RotateCcw, Subtitles, Volume2, VolumeX, X } from 'lucide-react';
 import { Button } from './ui/button';
+import { Spinner } from './ui/spinner';
 import { moveFocus } from './focus-navigation';
 import { readProgress, resumable, saveProgress } from '@/lib/progress';
 import { RemoteSeek, remoteKey } from '@/lib/remote-seek';
@@ -112,6 +113,7 @@ export function Player({ id, title, duration: initialDuration, tracks, restart }
     const video = videoRef.current!, root = rootRef.current!;
     video.focus();
     let lastSave = 0;
+    let waitingTimer: number | null = null;
     let initialSubtitle = tracks[0]?.language || 'off';
     try {
       const settings = JSON.parse(localStorage.getItem('sourcream:settings') || '{}');
@@ -140,9 +142,16 @@ export function Player({ id, title, duration: initialDuration, tracks, restart }
     function onEnded() { setEnded(true); setPlaying(false); visibleRef.current = true; setVisible(true); video.playbackRate = 1; saveProgress(id, video.duration, video.duration); }
     function onRate() { setRate(video.playbackRate); }
     function onVolume() { setVolume(video.volume); setMuted(video.muted); }
-    function onError() { setWaiting(false); setError('This movie could not be played. Check the drive connection and try again. If it persists, prepare a compatible MP4.'); visibleRef.current = true; setVisible(true); }
-    function onWaiting() { setWaiting(true); }
-    function onReady() { setWaiting(false); }
+    function stopWaiting() {
+      if (waitingTimer !== null) window.clearTimeout(waitingTimer);
+      waitingTimer = null; setWaiting(false);
+    }
+    function onError() { stopWaiting(); setError('This movie could not be played. Check the drive connection and try again. If it persists, prepare a compatible MP4.'); visibleRef.current = true; setVisible(true); }
+    function onWaiting() {
+      if (waitingTimer !== null) return;
+      waitingTimer = window.setTimeout(() => { waitingTimer = null; setWaiting(true); }, 600);
+    }
+    function onReady() { stopWaiting(); }
     function onFullscreen() { setFullscreen(!!document.fullscreenElement); }
     function seek(delta: number) { if (Number.isFinite(video.duration)) video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + delta)); }
     function speedUp() { try { video.playbackRate = Math.min(8, video.playbackRate < 2 ? 2 : video.playbackRate * 2); void video.play().catch(() => setVisible(true)); } catch { video.playbackRate = 1; setError('This browser cannot fast-play this file. Use 15-second jumps.'); } }
@@ -193,6 +202,7 @@ export function Player({ id, title, duration: initialDuration, tracks, restart }
     if (video.readyState >= 1) metadata();
     return () => {
       persist(); remoteSeek.cancel(); window.clearInterval(hide);
+      if (waitingTimer !== null) window.clearTimeout(waitingTimer);
       for (const [name, handler] of Object.entries(events)) video.removeEventListener(name, handler);
       for (let index = 0; index < video.textTracks.length; index++) video.textTracks[index].removeEventListener('cuechange', onCueChange);
       video.textTracks.removeEventListener('addtrack', onAddTrack);
@@ -226,7 +236,9 @@ export function Player({ id, title, duration: initialDuration, tracks, restart }
     <div className={`absolute inset-x-0 top-0 flex items-center justify-between bg-gradient-to-b from-black/80 to-transparent px-[4%] py-8 transition-opacity ${visible ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'}`} aria-hidden={!visible}>
       <a href="/" data-tv-focus tabIndex={tabIndex} className="inline-flex items-center gap-4 rounded-lg p-3 text-lg" onFocus={reveal}><ArrowLeft size={24} /> Library</a><span className="text-2xl font-semibold tracking-tight">sourcream.</span>
     </div>
-    {waiting && <div className="absolute left-1/2 top-1/4 -translate-x-1/2 rounded-lg border border-line bg-panel px-7 py-4 text-accent" role="status">Loading movie…</div>}
+    {waiting && <div className="pointer-events-none absolute inset-0 grid place-items-center">
+      <span className="rounded-full bg-black/60 p-3 text-white shadow-xl"><Spinner label="Buffering" /></span>
+    </div>}
     {rate > 1 && <button className="absolute left-1/2 top-24 -translate-x-1/2 rounded-lg border border-line bg-panel px-7 py-4 text-2xl text-accent" onClick={normalRate} aria-label="Return to normal speed">{rate}× <span className="mt-1 block text-xs text-neutral-300">Press Play for normal speed</span></button>}
     {error && <div className="absolute left-1/2 top-1/3 w-4/5 max-w-2xl -translate-x-1/2 rounded-xl border border-line bg-panel p-8 text-center" role="alert"><p className="mb-6 leading-7">{error}</p><Button onClick={() => { setError(''); videoRef.current?.load(); }} data-tv-focus>Retry playback</Button></div>}
     {ended && <div className="absolute left-1/2 top-1/3 w-4/5 max-w-2xl -translate-x-1/2 rounded-xl border border-line bg-panel p-8 text-center"><p>That’s a wrap.</p><h1 className="my-5 text-3xl">{title}</h1><div className="flex justify-center gap-4 max-sm:flex-col"><Button data-tv-focus onClick={() => { const video = videoRef.current!; video.currentTime = 0; void video.play().catch(() => {}); video.focus(); }}><RotateCcw size={21} /> Watch again</Button><a href="/" data-tv-focus className="inline-flex min-h-14 items-center justify-center rounded-lg border border-line bg-control px-6 font-medium">Back to library</a></div></div>}

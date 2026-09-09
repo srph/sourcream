@@ -15,4 +15,24 @@ button:focus-visible,a:focus-visible,video:focus-visible,input[type=range]:focus
 .timeline-range::-moz-range-thumb { background:var(--accent); border:0; }
 video::cue { font-family:'Inter',Arial,sans-serif; color:#fff; background:#000b; }
 
-@media(prefers-reduced-motion:reduce) { *,*::before,*::after { transition:none!important; } }
+.spinner {
+  --spinner-size:48px;
+  --spinner-stroke:3px;
+  width:var(--spinner-size);
+  height:var(--spinner-size);
+  border-radius:50%;
+  display:inline-block;
+  border-top:var(--spinner-stroke) solid currentColor;
+  border-right:var(--spinner-stroke) solid transparent;
+  box-sizing:border-box;
+  animation:spinner-rotation 1s linear infinite;
+}
+@keyframes spinner-rotation {
+  from { transform:rotate(0deg); }
+  to { transform:rotate(360deg); }
+}
+
+@media(prefers-reduced-motion:reduce) {
+  *,*::before,*::after { transition:none!important; }
+  .spinner { animation:none; }
+}
