@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme:dark; --accent:#d9ef91; }
+html,body { min-height:100%; background:#111311; color:#f2f3ed; font-family:'Inter',Arial,sans-serif; font-size:18px; }
+button,input,a { -webkit-tap-highlight-color:transparent; }
+button:focus-visible,a:focus-visible,video:focus-visible,input[type=range]:focus-visible { outline:3px solid var(--accent); outline-offset:5px; }
+
+.timeline-range { accent-color:var(--accent); cursor:pointer; -webkit-appearance:none; background:transparent; }
+.timeline-range::-webkit-slider-runnable-track { height:4px; border-radius:2px; background:linear-gradient(to right,var(--accent) var(--progress),#ffffff45 var(--progress)); }
+.timeline-range::-webkit-slider-thumb { -webkit-appearance:none; width:16px; height:16px; margin-top:-6px; background:var(--accent); border-radius:50%; }
+.timeline-range::-moz-range-track { height:4px; background:#ffffff45; }
+.timeline-range::-moz-range-progress { background:var(--accent); height:4px; }
+.timeline-range::-moz-range-thumb { background:var(--accent); border:0; }
+video::cue { font-family:'Inter',Arial,sans-serif; color:#fff; background:#000b; }
+
+@media(prefers-reduced-motion:reduce) { *,*::before,*::after { transition:none!important; } }

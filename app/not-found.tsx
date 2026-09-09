@@ -1,0 +1,1 @@
+export default function NotFound() { return <main className="message-page"><h1>Movie not found</h1><p>This title may have been removed from your collection.</p><a href="/" className="tv-button button-primary button-normal">Back to movies</a></main>; }
