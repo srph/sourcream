@@ -50,7 +50,7 @@ export function Library({ movies, query }: { movies: LibraryMovie[]; query: stri
   return <main className="min-h-screen bg-background text-foreground"><FocusNavigation />
     <header className="relative z-30 flex h-20 items-center gap-8 border-b border-white/5 px-[5%]">
       <a href="/" className="flex items-center text-2xl font-bold tracking-tight" data-tv-focus><span className="mr-3 grid h-10 w-10 place-items-center rounded-xl bg-accent text-black"><Film size={23} /></span>sourcream<span className="text-accent">.</span></a>
-      <form action="/" className="ml-auto flex w-80 items-center gap-3 rounded-lg border border-line bg-panel px-4 text-muted outline-offset-4 transition-colors focus-within:border-accent focus-within:outline focus-within:outline-2 focus-within:outline-accent" onSubmit={event => { event.preventDefault(); router.replace(search.trim() ? `/?q=${encodeURIComponent(search.trim())}` : '/'); }}>
+      <form action="/" className="ml-auto flex w-80 items-center gap-3 rounded-lg border border-line bg-panel px-4 text-muted outline-offset-4 transition-colors focus-within:outline focus-within:outline-2 focus-within:outline-accent" onSubmit={event => { event.preventDefault(); router.replace(search.trim() ? `/?q=${encodeURIComponent(search.trim())}` : '/'); }}>
         <Search className="shrink-0" size={21} />
         <input className="w-full min-w-0 border-0 bg-transparent py-3 text-sm text-foreground outline-none" name="q" aria-label="Search movies" placeholder="Search your library" value={search} onChange={event => setSearch(event.target.value)} data-tv-focus />
       </form>
@@ -71,10 +71,10 @@ export function Library({ movies, query }: { movies: LibraryMovie[]; query: stri
       </div>
     </section>}
 
-    <div className="relative -mt-3 px-[5%]">{!query && continueMovies.length > 0 && <section className="mb-12"><div className="mb-6 flex items-center justify-between"><h2 className="text-2xl font-medium tracking-tight">Pick up where you left off</h2><span className="text-sm text-muted">Continue watching</span></div><div className="grid grid-cols-4 gap-6 max-lg:grid-cols-3 max-sm:grid-cols-2 max-sm:gap-4">{continueMovies.map(movie => card(movie, true))}</div></section>}
-      <section className="mb-12"><div className="mb-6 flex items-center justify-between"><h2 className="flex items-center gap-4 text-2xl font-medium tracking-tight">{query ? 'Search results' : 'Your collection'}<span className="rounded border border-line bg-raised px-2 py-1 text-xs tracking-normal text-muted">{movies.length.toString().padStart(2, '0')}</span></h2>{!query && <span className="text-sm text-muted">Ready when you are</span>}</div>
+    <div className="relative -mt-3 px-[5%]">{!query && continueMovies.length > 0 && <section className="mb-12"><div className="mb-6 flex items-center justify-between"><h2 className="text-2xl font-medium tracking-tight">Continue watching</h2></div><div className="grid grid-cols-4 gap-6 max-lg:grid-cols-3 max-sm:grid-cols-2 max-sm:gap-4">{continueMovies.map(movie => card(movie, true))}</div></section>}
+      <section className="mb-12"><div className="mb-6 flex items-center justify-between"><h2 className="flex items-center gap-4 text-2xl font-medium tracking-tight">{query ? 'Search results' : 'Your collection'}<span className="rounded border border-line bg-raised px-2 py-1 text-xs tracking-normal text-muted">{movies.length.toString().padStart(2, '0')}</span></h2></div>
         {movies.length ? <div className="grid grid-cols-4 gap-6 max-lg:grid-cols-3 max-sm:grid-cols-2 max-sm:gap-4">{movies.map(movie => card(movie))}</div> : <div className="rounded-xl border border-line px-8 py-16 text-center text-muted"><Film className="mx-auto mb-5" size={40} /><h2 className="mb-3 text-3xl text-foreground">{query ? 'No movies found' : 'Make room for movie night.'}</h2><p className="mb-6">{query ? 'Try a different title, director, or genre.' : 'Your movies will appear here once they’re added to the library.'}</p>{query && <Button render={<a href="/" />} nativeButton={false} data-tv-focus variant="secondary"><X size={18} />Clear search</Button>}</div>}
-      </section><footer className="flex justify-between border-t border-line py-7 text-xs text-muted"><span>sourcream / your private picture house</span><span>Get comfortable. Press play.</span></footer>
+      </section><footer className="flex justify-between border-t border-line py-7 text-xs text-muted"><span>Crafted by Kier Borromeo</span></footer>
     </div>
   </main>;
 }
