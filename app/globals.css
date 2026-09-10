@@ -3,6 +3,7 @@
 @tailwind utilities;
 
 :root { color-scheme:dark; --accent:#d9ef91; --font-sans:'Inter',Arial,sans-serif; }
+html { -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; }
 html,body { min-height:100%; }
 button,input,a { -webkit-tap-highlight-color:transparent; }
 button:focus-visible,a:focus-visible,video:focus-visible,input[type=range]:focus-visible { outline:3px solid var(--accent); outline-offset:5px; }
