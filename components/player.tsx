@@ -76,7 +76,7 @@ export function Player({ id, title, duration: initialDuration, tracks, restart }
       if (!cues) continue;
       for (let cueIndex = 0; cueIndex < cues.length; cueIndex++) {
         const cue = cues[cueIndex] as VTTCue;
-        if ('line' in cue) { cue.snapToLines = true; cue.line = chromeVisible ? -9 : -3; }
+        if ('line' in cue) { cue.snapToLines = true; cue.line = chromeVisible ? -5 : -3; }
       }
     }
   }

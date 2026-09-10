@@ -24,12 +24,12 @@ Movie files stay in their existing folders. Nothing discovers or imports movies 
 
 ```powershell
 npm run movie -- inspect "relative/folder/movie.mp4"
-npm run movie -- add catalog/perfume.json
+npm run movie -- add "relative/folder/movie.mp4" --id perfume-2006 --title "Perfume: The Story of a Murderer" --year 2006 --director "Tom Tykwer" --genre Drama --genre Thriller --synopsis "In eighteenth-century France, a young man with an extraordinary sense of smell becomes obsessed with capturing the perfect scent." --subtitle "relative/folder/movie.srt|en|English"
 npm run movie -- frames perfume-2006 --at 1600
 npm run movie -- list
 ```
 
-The provided Perfume manifest is an explicitly selected, reviewable input example; the running app reads SQLite, not the manifest. Running `add` again refuses duplicate IDs unless `--replace` is supplied. Manifests have `id`, `title`, `year`, `director`, `genres`, `synopsis`, `video`, and optional `subtitles` entries (`file`, `language`, `label`). Paths are relative to `MOVIES_ROOT`; the scripts resolve junctions and reject paths outside it. Subtitle input is UTF-8 SRT or WebVTT. Subtitles are converted without changing originals, and `add` generates 320px player previews every 10 seconds. Updating a manifest uses a SQLite transaction, but obsolete generated subtitle files are retained for safety. See `docs/CATALOG.md` for the short workflow.
+SQLite is the only catalog source of truth; there are no manifest files. The `add` command accepts verified metadata directly, refuses duplicate IDs unless `--replace` is supplied, validates the media, and writes the catalog transactionally. Repeat `--genre` and `--subtitle` for multiple values. A subtitle uses `relative-file|language|label`; subtitle input is UTF-8 SRT or WebVTT. Paths are relative to `MOVIES_ROOT`; the scripts resolve junctions and reject paths outside it. Subtitles are converted without changing originals, and `add` generates 320px player previews every 10 seconds. Obsolete generated subtitle files are retained for safety. See `docs/CATALOG.md` for the short workflow.
 
 The discoverable project skill is in `.agents/skills/sourcream-catalog/SKILL.md`.
 
@@ -46,7 +46,7 @@ npm run movie -- prepare "relative/movie.mkv" --output "relative/movie.tv.mp4"
 npm run movie -- prepare "relative/movie.mkv" --output "relative/movie.tv.mp4" --execute
 ```
 
-Compatible H.264 is copied losslessly; unsupported audio becomes AAC stereo. Other video is encoded to H.264 with a 1080p maximum and 30fps. Fast-start metadata is written at the beginning of the MP4. For a compatible MP4 that lacks fast-start, the same script can remux it without re-encoding. Range support still allows the original MP4 to play. HDR tone mapping, surround-track selection and AVPlay are not implemented. The script does not silently register its output. Add it through a manifest after inspection.
+Compatible H.264 is copied losslessly; unsupported audio becomes AAC stereo. Other video is encoded to H.264 with a 1080p maximum and 30fps. Fast-start metadata is written at the beginning of the MP4. For a compatible MP4 that lacks fast-start, the same script can remux it without re-encoding. Range support still allows the original MP4 to play. HDR tone mapping, surround-track selection and AVPlay are not implemented. The script does not silently register its output. Add it explicitly after inspection.
 
 ## Controls
 

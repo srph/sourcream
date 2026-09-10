@@ -11,13 +11,37 @@ import { resolveFile, insideRoot } from '../lib/files';
 import { toWebVtt } from '../lib/subtitles';
 import { probe, compatibility, fastStart, ffmpeg } from './media';
 
-const manifestSchema = z.object({
+const catalogEntrySchema = z.object({
   id: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/), title: z.string().min(1), year: z.number().int().min(1888).max(2200),
   synopsis: z.string().default(''), director: z.string().default(''), genres: z.array(z.string()).default([]),
   video: z.string().min(1), subtitles: z.array(z.object({ file: z.string(), language: z.string().regex(/^[a-z]{2,3}(?:-[A-Za-z0-9]+)*$/), label: z.string().min(1) })).default([]),
 });
-const { values, positionals } = parseArgs({ allowPositionals: true, options: { at: { type: 'string' }, output: { type: 'string' }, execute: { type: 'boolean' }, replace: { type: 'boolean' } } });
+const { values, positionals } = parseArgs({
+  allowPositionals: true,
+  options: {
+    at: { type: 'string' },
+    output: { type: 'string' },
+    execute: { type: 'boolean' },
+    replace: { type: 'boolean' },
+    id: { type: 'string' },
+    title: { type: 'string' },
+    year: { type: 'string' },
+    director: { type: 'string' },
+    synopsis: { type: 'string' },
+    genre: { type: 'string', multiple: true },
+    subtitle: { type: 'string', multiple: true },
+  },
+});
 const [command, input] = positionals;
+
+const usage = 'Usage: npm run movie -- inspect <relative-video> | add <relative-video> --id <id> --title <title> --year <year> [--director <name>] [--genre <genre> ...] [--synopsis <text>] [--subtitle "<relative-file>|<language>|<label>" ...] [--replace] | frames <id> [--at seconds] | prepare <relative-video> --output <relative.mp4> [--execute] | list';
+
+function subtitleArgument(value: string) {
+  const parts = value.split('|');
+  if (parts.length !== 3) throw new Error('--subtitle must use "<relative-file>|<language>|<label>". Repeat the option for additional tracks.');
+  const [file, language, label] = parts;
+  return { file, language, label };
+}
 
 async function exists(target: string) {
   try { await stat(target); return true; } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
@@ -40,7 +64,7 @@ async function generatePreviews(id: string, videoPath: string) {
 
 async function main() {
   if (command === 'list') { console.table(db.select({ id: movies.id, title: movies.title, year: movies.year }).from(movies).all()); return; }
-  if (!input) throw new Error('Usage: npm run movie -- inspect <relative-video> | add <manifest.json> [--replace] | frames <id> [--at seconds] | prepare <relative-video> --output <relative.mp4> [--execute] | list');
+  if (!input) throw new Error(usage);
   if (command === 'inspect' || command === 'prepare') {
     const file = await resolveFile(moviesRoot, input);
     const info = probe(file.path), check = compatibility(info);
@@ -63,30 +87,39 @@ async function main() {
     return;
   }
   if (command === 'add') {
-    const manifest = manifestSchema.parse(JSON.parse(await readFile(input, 'utf8')));
-    const existing = db.select().from(movies).where(eq(movies.id, manifest.id)).get();
+    const entry = catalogEntrySchema.parse({
+      id: values.id,
+      title: values.title,
+      year: values.year === undefined ? undefined : Number(values.year),
+      director: values.director,
+      synopsis: values.synopsis,
+      genres: values.genre,
+      video: input,
+      subtitles: values.subtitle?.map(subtitleArgument),
+    });
+    const existing = db.select().from(movies).where(eq(movies.id, entry.id)).get();
     if (existing && !values.replace) throw new Error('Movie ID already exists; use --replace to update this catalog entry.');
-    const file = await resolveFile(moviesRoot, manifest.video);
+    const file = await resolveFile(moviesRoot, entry.video);
     if (path.extname(file.path).toLowerCase() !== '.mp4') throw new Error('Prepare an MP4 before adding it.');
     const info = probe(file.path), check = compatibility(info);
     if (!check.browserReady) throw new Error('Outside the conservative browser playback profile. Use prepare, then add the prepared MP4.');
     const duration = Number(info.format.duration);
     if (!Number.isFinite(duration) || duration <= 0) throw new Error('Invalid movie duration');
     const relativeVideoPath = path.relative(await realpath(moviesRoot), file.path);
-    if (existing && existing.videoPath !== relativeVideoPath && await exists(path.join(assetsRoot, manifest.id, 'previews'))) throw new Error('This replacement uses a different video, but preview frames already exist. Remove only that movie\'s generated previews directory, then retry.');
-    const previewsCreated = await generatePreviews(manifest.id, file.path);
+    if (existing && existing.videoPath !== relativeVideoPath && await exists(path.join(assetsRoot, entry.id, 'previews'))) throw new Error('This replacement uses a different video, but preview frames already exist. Remove only that movie\'s generated previews directory, then retry.');
+    const previewsCreated = await generatePreviews(entry.id, file.path);
     const tracks: (typeof subtitles.$inferInsert)[] = [];
-    for (const sub of manifest.subtitles) {
+    for (const sub of entry.subtitles) {
       const source = await resolveFile(moviesRoot, sub.file);
       if (source.info.size > 10 * 1024 * 1024) throw new Error('Subtitle file is unexpectedly large');
       const text = new TextDecoder('utf-8', { fatal: true }).decode(await readFile(source.path));
       const id = randomUUID();
-      const assetPath = `${manifest.id}/${id}.vtt`;
-      await mkdir(path.join(assetsRoot, manifest.id), { recursive: true });
+      const assetPath = `${entry.id}/${id}.vtt`;
+      await mkdir(path.join(assetsRoot, entry.id), { recursive: true });
       await writeFile(path.join(assetsRoot, assetPath), toWebVtt(text), { flag: 'wx' });
-      tracks.push({ id, movieId: manifest.id, language: sub.language, label: sub.label, assetPath });
+      tracks.push({ id, movieId: entry.id, language: sub.language, label: sub.label, assetPath });
     }
-    const row = { id: manifest.id, title: manifest.title, year: manifest.year, synopsis: manifest.synopsis, director: manifest.director, genres: manifest.genres, videoPath: relativeVideoPath, duration, width: check.video!.width!, height: check.video!.height!, videoCodec: check.video!.codec_name, audioCodec: check.audio?.codec_name || 'none', addedAt: existing?.addedAt || Date.now() };
+    const row = { id: entry.id, title: entry.title, year: entry.year, synopsis: entry.synopsis, director: entry.director, genres: entry.genres, videoPath: relativeVideoPath, duration, width: check.video!.width!, height: check.video!.height!, videoCodec: check.video!.codec_name, audioCodec: check.audio?.codec_name || 'none', addedAt: existing?.addedAt || Date.now() };
     db.transaction(tx => {
       tx.insert(movies).values(row).onConflictDoUpdate({ target: movies.id, set: row }).run();
       tx.delete(subtitles).where(eq(subtitles.movieId, row.id)).run();

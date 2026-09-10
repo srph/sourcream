@@ -47,7 +47,6 @@ scripts/
   media.ts                         FFmpeg/FFprobe and compatibility checks
   migrate.ts                       explicit Drizzle migration runner
 tests/                              Node test-runner tests for media and remote input
-catalog/perfume.json                example manifest shape
 .agents/skills/sourcream-catalog/  catalog-maintenance skill
 ```
 
@@ -55,7 +54,7 @@ catalog/perfume.json                example manifest shape
 
 `data/library.sqlite` is the catalog and `data/assets` contains generated artwork and converted subtitle files. Back these up together. Never put database files in `public/`.
 
-Movie and subtitle source paths in manifests are relative to `MOVIES_ROOT` (default `D:/Movies`). `resolveFile()` resolves real paths and rejects absolute paths, traversal, symlinks/junctions escaping the root, directories, and missing files. HTTP requests use catalog IDs and registered database paths; they never accept raw disk paths.
+Movie and subtitle source paths passed to the catalog CLI are relative to `MOVIES_ROOT` (default `D:/Movies`). `resolveFile()` resolves real paths and rejects absolute paths, traversal, symlinks/junctions escaping the root, directories, and missing files. HTTP requests use catalog IDs and registered database paths; they never accept raw disk paths.
 
 SQLite is configured with WAL mode, foreign keys, and a 5-second busy timeout. Preserve those pragmas: the development server and catalog work must be able to share the database safely.
 
@@ -63,11 +62,11 @@ The catalog is the source of truth. Browser `localStorage` is only for device-lo
 
 ## Catalog maintenance
 
-Only add movies the user explicitly selects. Read `README.md` and `.agents/skills/sourcream-catalog/SKILL.md` before catalog work. Use `catalog/perfume.json` as the manifest shape and do not invent uncertain metadata.
+Only add movies the user explicitly selects. Read `README.md` and `.agents/skills/sourcream-catalog/SKILL.md` before catalog work. Pass verified metadata directly to the catalog CLI and do not invent uncertain metadata.
 
 ```powershell
 npm run movie -- inspect "relative/movie.mp4"
-npm run movie -- add catalog/<id>.json
+npm run movie -- add "relative/movie.mp4" --id <id> --title "Title" --year <year> [metadata options]
 npm run movie -- frames <id> --at 1600
 npm run movie -- list
 
@@ -76,7 +75,7 @@ npm run movie -- prepare "relative/movie.mkv" --output "relative/movie.tv.mp4"
 npm run movie -- prepare "relative/movie.mkv" --output "relative/movie.tv.mp4" --execute
 ```
 
-`add` validates the manifest and media, requires an MP4 within the conservative browser profile, converts UTF-8 SRT input to WebVTT under `ASSETS_ROOT`, and updates the movie/subtitle rows transactionally. Existing IDs require `--replace`. Preparation never changes SQLite, replaces originals, or overwrites an existing output. After preparing a file, inspect it and add it explicitly.
+`add` accepts metadata directly, validates the media, requires an MP4 within the conservative browser profile, converts UTF-8 SRT input to WebVTT under `ASSETS_ROOT`, and updates the movie/subtitle rows transactionally. Existing IDs require `--replace`. SQLite is the sole catalog source of truth; do not create manifest files. Preparation never changes SQLite, replaces originals, or overwrites an existing output. After preparing a file, inspect it and add it explicitly.
 
 Frame generation creates `backdrop.jpg` and `poster.jpg` under `ASSETS_ROOT/<id>/` and never overwrites existing outputs. To regenerate, remove only those exact generated files; never remove source media.
 
