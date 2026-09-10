@@ -5,4 +5,4 @@ import '@fontsource/inter/600.css';
 import '@fontsource/inter/700.css';
 import './globals.css';
 export const metadata: Metadata = { title: 'Sourcream', description: 'Your personal movie library, at home.', robots: { index: false, follow: false } };
-export default function RootLayout({ children }: { children: React.ReactNode }) { return <html lang="en"><body>{children}</body></html>; }
+export default function RootLayout({ children }: { children: React.ReactNode }) { return <html lang="en"><body className="min-h-screen bg-background font-sans text-lg text-foreground">{children}</body></html>; }

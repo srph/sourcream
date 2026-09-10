@@ -47,7 +47,7 @@ export function Library({ movies, query }: { movies: LibraryMovie[]; query: stri
     </a>;
   }
 
-  return <main className="min-h-screen bg-background text-foreground"><FocusNavigation />
+  return <main><FocusNavigation />
     <header className="relative z-30 flex h-20 items-center gap-8 border-b border-white/5 px-[5%]">
       <a href="/" className="flex items-center text-2xl font-bold tracking-tight" data-tv-focus><span className="mr-3 grid h-10 w-10 place-items-center rounded-xl bg-accent text-black"><Film size={23} /></span>sourcream<span className="text-accent">.</span></a>
       <form action="/" className="ml-auto flex w-80 items-center gap-3 rounded-lg border border-line bg-panel px-4 text-muted outline-offset-4 transition-colors focus-within:outline focus-within:outline-2 focus-within:outline-accent" onSubmit={event => { event.preventDefault(); router.replace(search.trim() ? `/?q=${encodeURIComponent(search.trim())}` : '/'); }}>

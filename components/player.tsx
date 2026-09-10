@@ -225,7 +225,6 @@ export function Player({ id, title, duration: initialDuration, tracks, restart }
   const shownTime = scrubTime ?? time;
   const shownPreview = scrubTime ?? previewTime;
   const previewPercent = duration && shownPreview !== null ? shownPreview / duration * 100 : 0;
-  const previewLeft = Math.max(8, Math.min(92, previewPercent));
   const previewFrame = shownPreview === null ? 1 : Math.floor(shownPreview / 10) + 1;
 
   return <div ref={rootRef} className={`relative h-screen w-full overflow-hidden bg-black ${visible ? '' : 'cursor-none'}`} onMouseMove={reveal} onTouchStart={reveal}>
@@ -252,8 +251,8 @@ export function Player({ id, title, duration: initialDuration, tracks, restart }
 
     <div className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-black via-black/90 to-transparent px-[4%] pb-6 pt-24 transition-opacity ${visible ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'}`} aria-hidden={!visible} onFocus={reveal}>
       <div className="flex items-center gap-5 text-sm tabular-nums tv:text-lg"><span className="min-w-[60px]">{timeLabel(shownTime)}</span><div className="relative flex-1">
-        {shownPreview !== null && previewAvailable && <div className="pointer-events-none absolute bottom-9 z-30 -translate-x-1/2 overflow-hidden rounded-lg border border-white/30 bg-black shadow-xl" style={{ left: `${previewLeft}%` }}><img key={previewFrame} className="h-28 w-48 object-cover" src={`/api/movies/${id}/preview/${previewFrame}`} alt="" onError={() => setPreviewAvailable(false)} /><span className="block px-2 py-1 text-center text-xs text-white">{timeLabel(shownPreview)}</span></div>}
-        <input aria-label="Movie position" aria-valuetext={`${timeLabel(shownTime)} of ${timeLabel(duration)}`} data-seek="true" data-tv-focus tabIndex={tabIndex} className="timeline-range h-7 w-full" type="range" min={0} max={duration} step={1} value={Math.min(shownTime, duration)} style={{ '--progress': `${duration ? shownTime / duration * 100 : 0}%` } as React.CSSProperties}
+        {shownPreview !== null && previewAvailable && <div className="pointer-events-none absolute bottom-9 z-30 w-48 -translate-x-1/2 overflow-hidden rounded-lg border border-white/30 bg-black shadow-xl" style={{ left: `clamp(6rem, ${previewPercent}%, calc(100% - 6rem))` }}><img key={previewFrame} className="h-28 w-full object-cover" src={`/api/movies/${id}/preview/${previewFrame}`} alt="" onError={() => setPreviewAvailable(false)} /><span className="block px-2 py-1 text-center text-xs text-white">{timeLabel(shownPreview)}</span></div>}
+        <input aria-label="Movie position" aria-valuetext={`${timeLabel(shownTime)} of ${timeLabel(duration)}`} data-seek="true" data-tv-focus tabIndex={tabIndex} className="timeline-range h-7 w-full cursor-pointer appearance-none bg-transparent accent-accent" type="range" min={0} max={duration} step={1} value={Math.min(shownTime, duration)} style={{ '--progress': `${duration ? shownTime / duration * 100 : 0}%` } as React.CSSProperties}
           onChange={event => stageScrub(Number(event.target.value))}
           onPointerDown={event => { scrubbingRef.current = true; stageScrub(pointerTime(event)); }}
           onPointerMove={event => { const next = pointerTime(event); if (scrubbingRef.current) stageScrub(next); else { setPreviewTime(next); setPreviewAvailable(true); } }}
