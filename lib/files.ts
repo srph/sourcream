@@ -55,10 +55,8 @@ export async function fileResponse(request: Request, root: string, relative: str
     const status = range ? 206 : 200;
     if (request.method === 'HEAD' || size === 0) return new Response(null, { status, headers });
     const stream = createReadStream(file.path, { ...(range || {}), highWaterMark: 256 * 1024 });
-    const abort = () => stream.destroy();
-    request.signal.addEventListener('abort', abort, { once: true });
-    stream.once('close', () => request.signal.removeEventListener('abort', abort));
-    if (request.signal.aborted) stream.destroy();
+    // Next cancels the response body when the client disconnects. Readable.toWeb()
+    // propagates that cancellation to the Node stream, so it must own cleanup.
     return new Response(toBoundedWebStream(stream), { status, headers });
   } catch {
     return new Response('Media file unavailable. Check that the movie drive is connected.', { status: 404 });
