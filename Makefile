@@ -1,4 +1,4 @@
-.PHONY: install start
+.PHONY: install dev build start
 
 install:
 	npm install
@@ -6,5 +6,11 @@ install:
 	npm run db:migrate
 	npm run build
 
-start:
+dev:
+	npm run dev
+
+build:
+	npm run build
+
+start: build
 	npm start

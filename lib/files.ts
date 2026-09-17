@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { realpath, stat } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
-import { Readable } from 'node:stream';
+import type { Readable } from 'node:stream';
 
 export function insideRoot(root: string, candidate: string) {
   const relative = path.relative(root, candidate);
@@ -35,7 +35,59 @@ export function parseRange(header: string, size: number): { start: number; end: 
 export function toBoundedWebStream(stream: Readable) {
   // Count queued bytes, not chunks: the default Web Stream strategy can otherwise
   // buffer thousands of 256KB chunks for a slow TV connection.
-  return Readable.toWeb(stream, { strategy: { highWaterMark: 256 * 1024, size: (chunk: Uint8Array) => chunk.byteLength } }) as ReadableStream<Uint8Array>;
+  let controller: ReadableStreamDefaultController<Uint8Array>;
+  let settled = false;
+
+  const cleanup = () => {
+    stream.off('data', onData);
+    stream.off('end', onEnd);
+    stream.off('error', onError);
+    stream.off('close', onClose);
+  };
+  const close = () => {
+    if (settled) return;
+    settled = true;
+    cleanup();
+    controller.close();
+  };
+  const onData = (chunk: unknown) => {
+    if (settled) return;
+    if (!(chunk instanceof Uint8Array)) {
+      onError(new TypeError('Expected a binary stream chunk'));
+      return;
+    }
+    // Copy Buffers backed by Node's shared pool before handing them to Web Streams.
+    controller.enqueue(new Uint8Array(chunk));
+    if (controller.desiredSize !== null && controller.desiredSize <= 0) stream.pause();
+  };
+  const onEnd = () => close();
+  const onClose = () => close();
+  const onError = (error: Error) => {
+    if (settled) return;
+    settled = true;
+    cleanup();
+    controller.error(error);
+  };
+
+  return new ReadableStream<Uint8Array>({
+    start(value) {
+      controller = value;
+      stream.pause();
+      stream.on('data', onData);
+      stream.once('end', onEnd);
+      stream.once('error', onError);
+      stream.once('close', onClose);
+    },
+    pull() {
+      if (!settled) stream.resume();
+    },
+    cancel() {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      stream.destroy();
+    },
+  }, { highWaterMark: 256 * 1024, size: chunk => chunk.byteLength });
 }
 
 export async function fileResponse(request: Request, root: string, relative: string, contentType: string) {
@@ -55,8 +107,6 @@ export async function fileResponse(request: Request, root: string, relative: str
     const status = range ? 206 : 200;
     if (request.method === 'HEAD' || size === 0) return new Response(null, { status, headers });
     const stream = createReadStream(file.path, { ...(range || {}), highWaterMark: 256 * 1024 });
-    // Next cancels the response body when the client disconnects. Readable.toWeb()
-    // propagates that cancellation to the Node stream, so it must own cleanup.
     return new Response(toBoundedWebStream(stream), { status, headers });
   } catch {
     return new Response('Media file unavailable. Check that the movie drive is connected.', { status: 404 });

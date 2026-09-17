@@ -4,7 +4,7 @@ import { db } from '../db';
 import { movies, subtitles } from '../db/schema';
 import { resolveFile } from '../lib/files';
 import { moviesRoot } from '../lib/config';
-const base = process.env.TEST_URL || 'http://localhost:3000';
+const base = process.env.TEST_URL || 'http://localhost:25025';
 async function main() {
   for (const route of ['/', '/?q=Perfume', '/?q=no-such-movie-xyz', '/w/perfume-2006']) {
     const response = await fetch(base + route); assert.equal(response.status, 200, route); await response.arrayBuffer();

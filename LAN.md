@@ -7,10 +7,10 @@ Saved on 2026-09-09. These are instructions for later; no router, DNS, DHCP, fir
 Give the Sourcream PC a stable LAN address and let devices on the home network open:
 
 ```text
-http://sourcream.home.arpa:3000
+http://sourcream.home.arpa:25025
 ```
 
-No domain purchase or static public IP is required. `home.arpa` is reserved for residential network names. DNS maps the name to an IP; removing `:3000` would require a separate web-server/reverse-proxy setup.
+No domain purchase or static public IP is required. `home.arpa` is reserved for residential network names. DNS maps the name to an IP; removing `:25025` would require a separate web-server/reverse-proxy setup.
 
 ## Verified connection details
 
@@ -56,7 +56,7 @@ Addresses and service state may change after this snapshot. Use `ipconfig /all` 
 
    A field for upstream DNS servers does not create a local record. **DDNS** also serves a different purpose and is not the setting needed here.
 5. Keep LAN clients using the router for DNS. Confirm the record resolves when querying the router over both advertised DNS paths; an IPv4 A record can also be returned by a DNS server reached over IPv6.
-6. Reconnect the TV to the network if needed and open `http://sourcream.home.arpa:3000`.
+6. Reconnect the TV to the network if needed and open `http://sourcream.home.arpa:25025`.
 
 If the local-record menu is missing or disabled, do not assume the router supports this method. Check the alternative below and whether LAN DHCP DNS settings are editable. No firmware changes or WAN changes are needed for the intended local name.
 
@@ -92,7 +92,7 @@ Devices using custom DNS, encrypted DNS, VPN DNS, or an isolated guest network m
 ## Findings affecting hosting DNS on this Windows PC
 
 - **UDP 0.0.0.0:53 was already occupied by Internet Connection Sharing**, Windows service `SharedAccess`, hosted by `svchost.exe`. A DNS server on the PC would require investigating and resolving that binding conflict. The service was not stopped or reconfigured.
-- **Sourcream uses TCP port 3000.** AdGuard Home's default first-run setup also uses port 3000, so its setup interface would need a different port if installed here.
+- **Sourcream uses TCP port 25025.** This avoids AdGuard Home's default first-run port 3000 if both are installed here.
 - The PC has Hyper-V/WSL and other virtual adapters. Do not assume Internet Connection Sharing is unused or disable it without checking those dependencies.
 - Household DNS hosted only on this PC would depend on the PC remaining awake and available, even when nobody is watching a movie.
 - Tailscale is installed. The observed effective DNS rules covered Tailscale-related namespaces; no `home.arpa` rule was observed. Tailscale names alone do not provide a local name to every router-connected device, including the TV.
@@ -113,12 +113,12 @@ Both should return `192.168.1.5`. For a dedicated DNS server, use its actual IP 
 
 Then verify:
 
-1. `http://192.168.1.5:3000` still works.
-2. `http://sourcream.home.arpa:3000` works on the PC and TV.
+1. `http://192.168.1.5:25025` still works.
+2. `http://sourcream.home.arpa:25025` works on the PC and TV.
 3. Ordinary internet names still resolve.
 4. After a PC restart or DHCP renewal, the PC still gets its reserved address.
 
-Sourcream must be running, the movie drive connected, and the PC awake. DNS does not change application or firewall availability. The `:3000` suffix remains required with the current server configuration.
+Sourcream must be running, the movie drive connected, and the PC awake. DNS does not change application or firewall availability. The `:25025` suffix remains required with the current server configuration.
 
 Before making changes, record the original reservation and DNS values. If a later DNS change breaks resolution, restore the original advertised DNS settings and reconnect affected clients.
 

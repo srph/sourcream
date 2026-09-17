@@ -26,8 +26,11 @@ test('a slow client applies backpressure instead of buffering the movie', async 
   const web = toBoundedWebStream(stream);
   await new Promise(resolve => setTimeout(resolve, 30));
   assert.ok(bytesRead > 0 && bytesRead < 1024 * 1024, `Read ${bytesRead} bytes while consumer was idle`);
+  const bytesBeforeCancel = bytesRead;
   await web.cancel();
+  await new Promise(resolve => setImmediate(resolve));
   assert.equal(stream.destroyed, true);
+  assert.equal(bytesRead, bytesBeforeCancel, 'Source continued reading after cancellation');
 });
 
 test('stream responses support exact bytes, HEAD, validators, and missing files without exposing disk paths', async () => {
