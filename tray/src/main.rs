@@ -51,11 +51,11 @@ const TIMER_ID: usize = 1;
 const WM_TRAY: u32 = WM_APP + 1;
 const WM_SOURCREAM_RESULT: u32 = WM_APP + 2;
 const WM_TUNNEL_RESULT: u32 = WM_APP + 3;
-const WM_PAUSE_RESULT: u32 = WM_APP + 4;
+const WM_STOP_RESULT: u32 = WM_APP + 4;
 const WM_ACTION_ERROR: u32 = WM_APP + 5;
 const WM_LAN_RESULT: u32 = WM_APP + 6;
 
-const CMD_PAUSE_SOURCREAM: usize = 1001;
+const CMD_TOGGLE_SOURCREAM: usize = 1001;
 const CMD_RESTART_SOURCREAM: usize = 1002;
 const CMD_RESTART_TUNNEL: usize = 1003;
 const CMD_SHOW_APP: usize = 1004;
@@ -65,14 +65,15 @@ const CMD_EXIT: usize = 1007;
 const CMD_SHOW_APP_PUBLIC: usize = 1008;
 const CMD_COPY_LAN_URL: usize = 1009;
 
-const PAUSED: u8 = 0;
+const STOPPED: u8 = 0;
 const READY: u8 = 1;
 const RESTARTING: u8 = 2;
-const PAUSING: u8 = 3;
+const STOPPING: u8 = 3;
+const STARTING: u8 = 4;
 const NOT_READY: u8 = 0;
 
 static WINDOW: AtomicIsize = AtomicIsize::new(0);
-static SOURCREAM_STATUS: AtomicU8 = AtomicU8::new(PAUSED);
+static SOURCREAM_STATUS: AtomicU8 = AtomicU8::new(STOPPED);
 static TUNNEL_STATUS: AtomicU8 = AtomicU8::new(NOT_READY);
 static CHECK_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 static SOURCREAM_ACTION_AT_MS: AtomicU64 = AtomicU64::new(0);
@@ -405,24 +406,53 @@ fn report_action_error(error: String) {
     post_window_message(WM_ACTION_ERROR, 0);
 }
 
-fn pause_sourcream() {
+fn stop_sourcream() {
     if SOURCREAM_STATUS.load(Ordering::Acquire) != READY {
         return;
     }
 
-    SOURCREAM_STATUS.store(PAUSING, Ordering::Release);
+    SOURCREAM_STATUS.store(STOPPING, Ordering::Release);
     update_tray();
     std::thread::spawn(|| match stop_server() {
-        Ok(()) => post_window_message(WM_PAUSE_RESULT, 1),
+        Ok(()) => post_window_message(WM_STOP_RESULT, 1),
         Err(error) => report_action_error(error),
     });
 }
 
+fn start_sourcream() {
+    if SOURCREAM_STATUS.load(Ordering::Acquire) != STOPPED {
+        return;
+    }
+
+    SOURCREAM_STATUS.store(STARTING, Ordering::Release);
+    SOURCREAM_ACTION_AT_MS.store(now_ms(), Ordering::Release);
+    update_tray();
+    std::thread::spawn(|| {
+        if sourcream_is_ready() {
+            post_window_message(WM_SOURCREAM_RESULT, 1);
+            return;
+        }
+
+        match launch_server() {
+            Ok(()) => wait_for_startup(),
+            Err(error) => {
+                post_window_message(WM_SOURCREAM_RESULT, 2);
+                report_action_error(error);
+            }
+        }
+    });
+}
+
+fn toggle_sourcream() {
+    match SOURCREAM_STATUS.load(Ordering::Acquire) {
+        READY => stop_sourcream(),
+        STOPPED => start_sourcream(),
+        _ => {}
+    }
+}
+
 fn restart_sourcream() {
-    if matches!(
-        SOURCREAM_STATUS.load(Ordering::Acquire),
-        RESTARTING | PAUSING
-    ) {
+    if SOURCREAM_STATUS.load(Ordering::Acquire) != READY {
         return;
     }
 
@@ -431,15 +461,14 @@ fn restart_sourcream() {
     update_tray();
 
     std::thread::spawn(|| {
-        let result = if sourcream_is_ready() {
-            stop_server().and_then(|()| launch_server())
-        } else {
-            launch_server()
-        };
+        let result = stop_server().and_then(|()| launch_server());
 
         match result {
             Ok(()) => wait_for_startup(),
-            Err(error) => report_action_error(error),
+            Err(error) => {
+                post_window_message(WM_SOURCREAM_RESULT, 2);
+                report_action_error(error);
+            }
         }
     });
 }
@@ -537,9 +566,10 @@ fn show_about() {
 fn sourcream_label() -> &'static str {
     match SOURCREAM_STATUS.load(Ordering::Acquire) {
         READY => "Sourcream (Ready)",
+        STARTING => "Sourcream (Starting…)",
         RESTARTING => "Sourcream (Restarting…)",
-        PAUSING => "Sourcream (Pausing…)",
-        _ => "Sourcream (Paused)",
+        STOPPING => "Sourcream (Stopping…)",
+        _ => "Sourcream (Stopped)",
     }
 }
 
@@ -581,7 +611,7 @@ unsafe fn load_status_icon(
 unsafe fn status_icon() -> windows_sys::Win32::UI::WindowsAndMessaging::HICON {
     let sourcream = SOURCREAM_STATUS.load(Ordering::Acquire);
     let tunnel = TUNNEL_STATUS.load(Ordering::Acquire);
-    if matches!(sourcream, RESTARTING | PAUSING) || tunnel == RESTARTING {
+    if matches!(sourcream, STARTING | RESTARTING | STOPPING) || tunnel == RESTARTING {
         load_status_icon(&BUSY_ICON, "status-busy.ico")
     } else if tunnel != READY {
         load_status_icon(&ERROR_ICON, "status-error.ico")
@@ -659,7 +689,12 @@ fn show_menu(hwnd: HWND) {
         }
 
         let sourcream = wide(sourcream_label());
-        let pause = wide("Pause Sourcream");
+        let sourcream_status = SOURCREAM_STATUS.load(Ordering::Acquire);
+        let toggle_sourcream_text = wide(if sourcream_status == READY {
+            "Stop Sourcream"
+        } else {
+            "Start Sourcream"
+        });
         let restart_sourcream_text = wide("Restart Sourcream");
         let tunnel = wide(tunnel_label());
         let restart_tunnel_text = wide("Restart Tunnel");
@@ -683,16 +718,13 @@ fn show_menu(hwnd: HWND) {
         );
         AppendMenuW(
             menu,
-            disabled_when(SOURCREAM_STATUS.load(Ordering::Acquire) != READY),
-            CMD_PAUSE_SOURCREAM,
-            pause.as_ptr(),
+            disabled_when(!matches!(sourcream_status, READY | STOPPED)),
+            CMD_TOGGLE_SOURCREAM,
+            toggle_sourcream_text.as_ptr(),
         );
         AppendMenuW(
             menu,
-            disabled_when(matches!(
-                SOURCREAM_STATUS.load(Ordering::Acquire),
-                RESTARTING | PAUSING
-            )),
+            disabled_when(sourcream_status != READY),
             CMD_RESTART_SOURCREAM,
             restart_sourcream_text.as_ptr(),
         );
@@ -771,14 +803,14 @@ unsafe extern "system" fn window_proc(
         let current = SOURCREAM_STATUS.load(Ordering::Acquire);
         let status = if wparam == 1 {
             READY
-        } else if wparam == 2 || current == PAUSING {
-            PAUSED
-        } else if current == RESTARTING
+        } else if wparam == 2 || current == STOPPING {
+            STOPPED
+        } else if matches!(current, STARTING | RESTARTING)
             && now_ms().saturating_sub(SOURCREAM_ACTION_AT_MS.load(Ordering::Acquire)) < 15_000
         {
-            RESTARTING
+            current
         } else {
-            PAUSED
+            STOPPED
         };
         SOURCREAM_STATUS.store(status, Ordering::Release);
         update_tray();
@@ -801,8 +833,8 @@ unsafe extern "system" fn window_proc(
         return 0;
     }
 
-    if message == WM_PAUSE_RESULT {
-        SOURCREAM_STATUS.store(PAUSED, Ordering::Release);
+    if message == WM_STOP_RESULT {
+        SOURCREAM_STATUS.store(STOPPED, Ordering::Release);
         update_tray();
         return 0;
     }
@@ -837,7 +869,7 @@ unsafe extern "system" fn window_proc(
         }
         WM_COMMAND => {
             match wparam & 0xffff {
-                CMD_PAUSE_SOURCREAM => pause_sourcream(),
+                CMD_TOGGLE_SOURCREAM => toggle_sourcream(),
                 CMD_RESTART_SOURCREAM => restart_sourcream(),
                 CMD_RESTART_TUNNEL => {
                     if let Err(error) = restart_tunnel() {

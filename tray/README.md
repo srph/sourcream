@@ -27,7 +27,7 @@ Startup shortcut, and launches the new build. Run `uninstall-startup.ps1` to rem
 Startup shortcut.
 
 The monitor does not start Sourcream automatically. Its menu shows independent Sourcream
-and Cloudflare Tunnel status sections, can pause or restart Sourcream, and can request an
+and Cloudflare Tunnel status sections, can start, stop, or restart Sourcream, and can request an
 elevated restart of the Windows `Cloudflared` service. Server output is written to
 `tray/sourcream-server.log` and replaced on each server start.
 
@@ -44,7 +44,7 @@ The tray mark is a white IBM Plex Mono `S` inside a status circle:
 
 - Green: Sourcream and the tunnel are ready.
 - Amber: an action is in progress.
-- Gray: Sourcream is paused and the tunnel is ready.
+- Gray: Sourcream is stopped and the tunnel is ready.
 - Red: the Cloudflare Tunnel is not ready.
 
 The production `.ico` files are generated from the SVG masters under `tray/assets` and are
