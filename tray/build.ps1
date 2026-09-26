@@ -15,10 +15,24 @@ if ($null -eq $cargo) {
 Push-Location $trayRoot
 try {
     & $cargoPath build --release
+    if ($LASTEXITCODE -ne 0) {
+        throw "The tray release build failed."
+    }
+
+    $running = @(Get-Process -Name "sourcream-tray" -ErrorAction SilentlyContinue)
+    foreach ($process in $running) {
+        Stop-Process -Id $process.Id -Force
+        $process.WaitForExit(5000) | Out-Null
+    }
+
     New-Item -ItemType Directory -Force -Path $dist | Out-Null
-    Copy-Item -Force (Join-Path $trayRoot "target\release\sourcream-tray.exe") (Join-Path $dist "sourcream-tray.exe")
+    $executable = Join-Path $dist "sourcream-tray.exe"
+    Copy-Item -Force (Join-Path $trayRoot "target\release\sourcream-tray.exe") $executable
+
+    & (Join-Path $trayRoot "install-startup.ps1")
+    Start-Process -FilePath $executable -WorkingDirectory $trayRoot -WindowStyle Hidden
 } finally {
     Pop-Location
 }
 
-Write-Host "Built $dist\sourcream-tray.exe"
+Write-Host "Built, installed, and started $dist\sourcream-tray.exe"

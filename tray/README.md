@@ -4,26 +4,29 @@ A native Windows notification-area monitor for Sourcream. It uses a Win32 messag
 performs one short localhost health check every ten seconds, and has no GUI framework or
 async runtime.
 
-## Build
+## Install dependencies
 
-Install the stable Rust toolchain, then run:
-
-```powershell
-cd tray
-.\build.ps1
-```
-
-The release executable is written to `tray/dist/sourcream-tray.exe`.
-
-## Run at sign-in
+From the repository root:
 
 ```powershell
-.\install-startup.ps1
+make install:tray
 ```
 
-This creates a shortcut in the current user's Startup folder. Run
-`uninstall-startup.ps1` to remove it.
+This installs the minimal stable Rust toolchain when Cargo is missing and downloads the
+locked Cargo dependencies. It does not build, install, or launch the tray monitor.
 
-The monitor does not start Sourcream automatically. Use its tray menu to start the
-production server. Server output is written to `tray/sourcream-server.log` and replaced
-on each server start.
+## Build and install
+
+```powershell
+make build:tray
+```
+
+This runs `install:tray`, creates an optimized release build, safely replaces a running
+monitor, writes `tray/dist/sourcream-tray.exe`, installs or refreshes the current user's
+Startup shortcut, and launches the new build. Run `uninstall-startup.ps1` to remove the
+Startup shortcut.
+
+The monitor does not start Sourcream automatically. Its menu shows independent Sourcream
+and Cloudflare Tunnel status sections, can pause or restart Sourcream, and can request an
+elevated restart of the Windows `Cloudflared` service. Server output is written to
+`tray/sourcream-server.log` and replaced on each server start.

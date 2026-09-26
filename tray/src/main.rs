@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::ptr::{null, null_mut};
 use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, AtomicU64, AtomicU8, Ordering};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use windows_sys::Win32::Foundation::{
     GetLastError, ERROR_ALREADY_EXISTS, HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM,
@@ -16,44 +17,56 @@ use windows_sys::Win32::Foundation::{
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Threading::{CreateMutexW, CREATE_NO_WINDOW};
 use windows_sys::Win32::UI::Shell::{
-    Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY,
-    NIM_SETVERSION, NOTIFYICONDATAW, NOTIFYICON_VERSION_4,
+    ShellExecuteW, Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE,
+    NIM_MODIFY, NIM_SETVERSION, NOTIFYICONDATAW, NOTIFYICON_VERSION_4,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
-    DispatchMessageW, GetCursorPos, GetMessageW, LoadIconW, PostMessageW, PostQuitMessage,
+    AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DispatchMessageW,
+    GetCursorPos, GetMessageW, LoadIconW, MessageBoxW, PostMessageW, PostQuitMessage,
     RegisterClassW, RegisterWindowMessageW, SetForegroundWindow, SetTimer, TrackPopupMenu,
     TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, HMENU, IDI_APPLICATION,
-    IDI_INFORMATION, IDI_WARNING, MF_DISABLED, MF_GRAYED, MF_SEPARATOR, MF_STRING, MSG,
-    TPM_BOTTOMALIGN, TPM_RIGHTBUTTON, WM_APP, WM_COMMAND, WM_CONTEXTMENU, WM_DESTROY,
-    WM_LBUTTONUP, WM_RBUTTONUP, WM_TIMER, WNDCLASSW, WS_OVERLAPPED,
+    IDI_INFORMATION, IDI_WARNING, MB_ICONERROR, MB_ICONINFORMATION, MB_OK, MF_DISABLED, MF_GRAYED,
+    MF_SEPARATOR, MF_STRING, MSG, SW_HIDE, TPM_BOTTOMALIGN, TPM_RIGHTBUTTON, WM_APP, WM_COMMAND,
+    WM_CONTEXTMENU, WM_DESTROY, WM_LBUTTONUP, WM_RBUTTONUP, WM_TIMER, WNDCLASSW, WS_OVERLAPPED,
 };
 
 const APP_NAME: &str = "Sourcream Monitor";
-const HOST: &str = "127.0.0.1:25025";
-const HEALTH_PATH: &str = "/api/health";
+const SOURCREAM_HOST: &str = "127.0.0.1:25025";
+const SOURCREAM_HEALTH_PATH: &str = "/api/health";
 const CHECK_INTERVAL_MS: u32 = 10_000;
-const REQUEST_TIMEOUT_MS: u64 = 700;
+const SOURCREAM_TIMEOUT_MS: u64 = 700;
+const TUNNEL_TIMEOUT_MS: u64 = 200;
 
 const TRAY_ID: u32 = 1;
 const TIMER_ID: usize = 1;
 const WM_TRAY: u32 = WM_APP + 1;
-const WM_HEALTH_RESULT: u32 = WM_APP + 2;
+const WM_SOURCREAM_RESULT: u32 = WM_APP + 2;
+const WM_TUNNEL_RESULT: u32 = WM_APP + 3;
+const WM_PAUSE_RESULT: u32 = WM_APP + 4;
+const WM_ACTION_ERROR: u32 = WM_APP + 5;
 
-const CMD_START: usize = 1001;
-const CMD_OPEN: usize = 1002;
-const CMD_LOGS: usize = 1003;
-const CMD_EXIT: usize = 1004;
+const CMD_PAUSE_SOURCREAM: usize = 1001;
+const CMD_RESTART_SOURCREAM: usize = 1002;
+const CMD_RESTART_TUNNEL: usize = 1003;
+const CMD_SHOW_APP: usize = 1004;
+const CMD_SHOW_LOGS: usize = 1005;
+const CMD_ABOUT: usize = 1006;
+const CMD_EXIT: usize = 1007;
 
-const OFFLINE: u8 = 0;
-const ONLINE: u8 = 1;
-const STARTING: u8 = 2;
+const PAUSED: u8 = 0;
+const READY: u8 = 1;
+const RESTARTING: u8 = 2;
+const PAUSING: u8 = 3;
+const NOT_READY: u8 = 0;
 
 static WINDOW: AtomicIsize = AtomicIsize::new(0);
-static STATUS: AtomicU8 = AtomicU8::new(OFFLINE);
+static SOURCREAM_STATUS: AtomicU8 = AtomicU8::new(PAUSED);
+static TUNNEL_STATUS: AtomicU8 = AtomicU8::new(NOT_READY);
 static CHECK_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
-static STARTED_AT_MS: AtomicU64 = AtomicU64::new(0);
+static SOURCREAM_ACTION_AT_MS: AtomicU64 = AtomicU64::new(0);
+static TUNNEL_ACTION_AT_MS: AtomicU64 = AtomicU64::new(0);
 static TASKBAR_CREATED_MESSAGE: AtomicU32 = AtomicU32::new(0);
+static ACTION_ERROR: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 
 fn wide(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(Some(0)).collect()
@@ -64,6 +77,13 @@ fn copy_wide<const N: usize>(destination: &mut [u16; N], value: &str) {
     for (slot, character) in destination.iter_mut().zip(encoded) {
         *slot = character;
     }
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 fn project_root() -> PathBuf {
@@ -98,52 +118,49 @@ fn node_path() -> PathBuf {
     }
 }
 
-fn http_status(path: &str) -> Option<u16> {
-    let address: SocketAddr = match HOST.parse() {
-        Ok(address) => address,
-        Err(_) => return None,
-    };
-    let timeout = Duration::from_millis(REQUEST_TIMEOUT_MS);
-    let mut stream = match TcpStream::connect_timeout(&address, timeout) {
-        Ok(stream) => stream,
-        Err(_) => return None,
-    };
+fn http_status(host: &str, path: &str, timeout_ms: u64) -> Option<u16> {
+    let address: SocketAddr = host.parse().ok()?;
+    let timeout = Duration::from_millis(timeout_ms);
+    let mut stream = TcpStream::connect_timeout(&address, timeout).ok()?;
     let _ = stream.set_read_timeout(Some(timeout));
     let _ = stream.set_write_timeout(Some(timeout));
 
-    let request = format!(
-        "GET {path} HTTP/1.1\r\nHost: {HOST}\r\nConnection: close\r\n\r\n"
-    );
-    if stream.write_all(request.as_bytes()).is_err() {
-        return None;
-    }
+    let request = format!("GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n");
+    stream.write_all(request.as_bytes()).ok()?;
 
     let mut response = [0_u8; 64];
-    let read = match stream.read(&mut response) {
-        Ok(read) => read,
-        Err(_) => return None,
-    };
-    let status_line = String::from_utf8_lossy(&response[..read]);
-    status_line
+    let read = stream.read(&mut response).ok()?;
+    String::from_utf8_lossy(&response[..read])
         .split_whitespace()
         .nth(1)
         .and_then(|status| status.parse().ok())
 }
 
-fn server_is_live() -> bool {
-    match http_status(HEALTH_PATH) {
+fn sourcream_is_ready() -> bool {
+    match http_status(SOURCREAM_HOST, SOURCREAM_HEALTH_PATH, SOURCREAM_TIMEOUT_MS) {
         Some(200 | 204) => true,
-        // A server started from a build made before the health route was added.
-        Some(404) => matches!(http_status("/"), Some(200)),
+        Some(404) => matches!(
+            http_status(SOURCREAM_HOST, "/", SOURCREAM_TIMEOUT_MS),
+            Some(200)
+        ),
         _ => false,
     }
 }
 
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
+fn tunnel_is_ready() -> bool {
+    (20241..=20245).any(|port| {
+        let host = format!("127.0.0.1:{port}");
+        matches!(http_status(&host, "/ready", TUNNEL_TIMEOUT_MS), Some(200))
+    })
+}
+
+fn post_window_message(message: u32, value: usize) {
+    let hwnd = WINDOW.load(Ordering::Acquire) as HWND;
+    if !hwnd.is_null() {
+        unsafe {
+            PostMessageW(hwnd, message, value, 0);
+        }
+    }
 }
 
 fn request_health_check() {
@@ -152,14 +169,11 @@ fn request_health_check() {
     }
 
     std::thread::spawn(|| {
-        let online = server_is_live();
+        let sourcream_ready = sourcream_is_ready();
+        let tunnel_ready = tunnel_is_ready();
         CHECK_IN_PROGRESS.store(false, Ordering::Release);
-        let hwnd = WINDOW.load(Ordering::Acquire) as HWND;
-        if !hwnd.is_null() {
-            unsafe {
-                PostMessageW(hwnd, WM_HEALTH_RESULT, usize::from(online), 0);
-            }
-        }
+        post_window_message(WM_SOURCREAM_RESULT, usize::from(sourcream_ready));
+        post_window_message(WM_TUNNEL_RESULT, usize::from(tunnel_ready));
     });
 }
 
@@ -197,47 +211,149 @@ fn launch_server() -> Result<(), String> {
     Ok(())
 }
 
+fn listener_pid() -> Result<Option<u32>, String> {
+    let output = Command::new("netstat.exe")
+        .args(["-ano", "-p", "tcp"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|error| format!("Could not inspect Sourcream's port: {error}"))?;
+
+    if !output.status.success() {
+        return Err("Windows could not inspect Sourcream's port.".into());
+    }
+
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let columns: Vec<_> = line.split_whitespace().collect();
+        if columns.len() >= 5
+            && columns[0].eq_ignore_ascii_case("TCP")
+            && columns[1].rsplit(':').next() == Some("25025")
+            && columns[3].eq_ignore_ascii_case("LISTENING")
+        {
+            if let Ok(pid) = columns[4].parse() {
+                return Ok(Some(pid));
+            }
+        }
+    }
+
+    Ok(None)
+}
+
+fn stop_server() -> Result<(), String> {
+    if let Some(pid) = listener_pid()? {
+        if pid == std::process::id() {
+            return Err("Refusing to stop the tray monitor itself.".into());
+        }
+
+        let output = Command::new("taskkill.exe")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .map_err(|error| format!("Could not stop Sourcream: {error}"))?;
+
+        if !output.status.success() && sourcream_is_ready() {
+            return Err("Windows could not stop the Sourcream server.".into());
+        }
+    }
+
+    for _ in 0..30 {
+        if !sourcream_is_ready() {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    Err("Sourcream did not stop within three seconds.".into())
+}
+
 fn wait_for_startup() {
     std::thread::spawn(|| {
         for _ in 0..20 {
             std::thread::sleep(Duration::from_millis(500));
-            if server_is_live() {
-                let hwnd = WINDOW.load(Ordering::Acquire) as HWND;
-                if !hwnd.is_null() {
-                    unsafe {
-                        PostMessageW(hwnd, WM_HEALTH_RESULT, 1, 0);
-                    }
-                }
+            if sourcream_is_ready() {
+                post_window_message(WM_SOURCREAM_RESULT, 1);
                 return;
             }
         }
+        post_window_message(WM_SOURCREAM_RESULT, 2);
+    });
+}
 
-        let hwnd = WINDOW.load(Ordering::Acquire) as HWND;
-        if !hwnd.is_null() {
-            unsafe {
-                // 2 distinguishes a completed startup timeout from an ordinary failed poll.
-                PostMessageW(hwnd, WM_HEALTH_RESULT, 2, 0);
-            }
+fn report_action_error(error: String) {
+    let slot = ACTION_ERROR.get_or_init(|| Mutex::new(None));
+    if let Ok(mut pending) = slot.lock() {
+        *pending = Some(error);
+    }
+    post_window_message(WM_ACTION_ERROR, 0);
+}
+
+fn pause_sourcream() {
+    if SOURCREAM_STATUS.load(Ordering::Acquire) != READY {
+        return;
+    }
+
+    SOURCREAM_STATUS.store(PAUSING, Ordering::Release);
+    update_tray();
+    std::thread::spawn(|| match stop_server() {
+        Ok(()) => post_window_message(WM_PAUSE_RESULT, 1),
+        Err(error) => report_action_error(error),
+    });
+}
+
+fn restart_sourcream() {
+    if matches!(
+        SOURCREAM_STATUS.load(Ordering::Acquire),
+        RESTARTING | PAUSING
+    ) {
+        return;
+    }
+
+    SOURCREAM_STATUS.store(RESTARTING, Ordering::Release);
+    SOURCREAM_ACTION_AT_MS.store(now_ms(), Ordering::Release);
+    update_tray();
+
+    std::thread::spawn(|| {
+        let result = if sourcream_is_ready() {
+            stop_server().and_then(|()| launch_server())
+        } else {
+            launch_server()
+        };
+
+        match result {
+            Ok(()) => wait_for_startup(),
+            Err(error) => report_action_error(error),
         }
     });
 }
 
-fn start_server() -> Result<(), String> {
-    STATUS.store(STARTING, Ordering::Release);
-    STARTED_AT_MS.store(now_ms(), Ordering::Release);
-    update_tray();
-
-    match launch_server() {
-        Ok(()) => {
-            wait_for_startup();
-            Ok(())
-        }
-        Err(error) => {
-            STATUS.store(OFFLINE, Ordering::Release);
-            update_tray();
-            Err(error)
-        }
+fn restart_tunnel() -> Result<(), String> {
+    if TUNNEL_STATUS.load(Ordering::Acquire) == RESTARTING {
+        return Ok(());
     }
+
+    let operation = wide("runas");
+    let executable = wide("powershell.exe");
+    let parameters = wide(
+        "-NoProfile -NonInteractive -WindowStyle Hidden -Command \"Restart-Service -Name 'Cloudflared' -Force\"",
+    );
+    let result = unsafe {
+        ShellExecuteW(
+            WINDOW.load(Ordering::Acquire) as HWND,
+            operation.as_ptr(),
+            executable.as_ptr(),
+            parameters.as_ptr(),
+            null(),
+            SW_HIDE,
+        )
+    };
+
+    if result as isize <= 32 {
+        return Err("Windows could not request the Cloudflare Tunnel restart.".into());
+    }
+
+    TUNNEL_STATUS.store(RESTARTING, Ordering::Release);
+    TUNNEL_ACTION_AT_MS.store(now_ms(), Ordering::Release);
+    update_tray();
+    Ok(())
 }
 
 fn open_url() {
@@ -258,33 +374,60 @@ fn open_logs() {
         .spawn();
 }
 
-fn show_error(message: &str) {
+fn show_message(message: &str, icon: u32) {
     let title = wide(APP_NAME);
     let message = wide(message);
     unsafe {
-        windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW(
+        MessageBoxW(
             WINDOW.load(Ordering::Acquire) as HWND,
             message.as_ptr(),
             title.as_ptr(),
-            windows_sys::Win32::UI::WindowsAndMessaging::MB_OK
-                | windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONERROR,
+            MB_OK | icon,
         );
     }
 }
 
-fn status_label() -> &'static str {
-    match STATUS.load(Ordering::Acquire) {
-        ONLINE => "Sourcream — Running",
-        STARTING => "Sourcream — Starting…",
-        _ => "Sourcream — Offline",
+fn show_error(message: &str) {
+    show_message(message, MB_ICONERROR);
+}
+
+fn show_about() {
+    show_message(
+        concat!(
+            "Sourcream Monitor ",
+            env!("CARGO_PKG_VERSION"),
+            "\n\nNative Windows monitor for Sourcream and Cloudflare Tunnel."
+        ),
+        MB_ICONINFORMATION,
+    );
+}
+
+fn sourcream_label() -> &'static str {
+    match SOURCREAM_STATUS.load(Ordering::Acquire) {
+        READY => "Sourcream (Ready)",
+        RESTARTING => "Sourcream (Restarting…)",
+        PAUSING => "Sourcream (Pausing…)",
+        _ => "Sourcream (Paused)",
+    }
+}
+
+fn tunnel_label() -> &'static str {
+    match TUNNEL_STATUS.load(Ordering::Acquire) {
+        READY => "Tunnel (Ready)",
+        RESTARTING => "Tunnel (Restarting…)",
+        _ => "Tunnel (Not Ready)",
     }
 }
 
 unsafe fn status_icon() -> windows_sys::Win32::UI::WindowsAndMessaging::HICON {
-    let icon = match STATUS.load(Ordering::Acquire) {
-        ONLINE => IDI_INFORMATION,
-        STARTING => IDI_WARNING,
-        _ => IDI_APPLICATION,
+    let sourcream = SOURCREAM_STATUS.load(Ordering::Acquire);
+    let tunnel = TUNNEL_STATUS.load(Ordering::Acquire);
+    let icon = if sourcream == READY && tunnel == READY {
+        IDI_INFORMATION
+    } else if matches!(sourcream, RESTARTING | PAUSING) || tunnel == RESTARTING {
+        IDI_WARNING
+    } else {
+        IDI_APPLICATION
     };
     LoadIconW(0 as HINSTANCE, icon)
 }
@@ -297,7 +440,10 @@ fn tray_data(hwnd: HWND) -> NOTIFYICONDATAW {
     data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     data.uCallbackMessage = WM_TRAY;
     data.hIcon = unsafe { status_icon() };
-    copy_wide(&mut data.szTip, status_label());
+    copy_wide(
+        &mut data.szTip,
+        &format!("{} | {}", sourcream_label(), tunnel_label()),
+    );
     data
 }
 
@@ -330,6 +476,14 @@ fn remove_tray_icon() {
     }
 }
 
+fn disabled_when(disabled: bool) -> u32 {
+    if disabled {
+        MF_STRING | MF_DISABLED | MF_GRAYED
+    } else {
+        MF_STRING
+    }
+}
+
 fn show_menu(hwnd: HWND) {
     unsafe {
         let menu: HMENU = CreatePopupMenu();
@@ -337,23 +491,58 @@ fn show_menu(hwnd: HWND) {
             return;
         }
 
-        let status = wide(status_label());
-        let open = wide("Open Sourcream");
-        let start = wide("Start Sourcream");
-        let logs = wide("Open Logs");
-        let exit = wide("Exit Monitor");
+        let sourcream = wide(sourcream_label());
+        let pause = wide("Pause Sourcream");
+        let restart_sourcream_text = wide("Restart Sourcream");
+        let tunnel = wide(tunnel_label());
+        let restart_tunnel_text = wide("Restart Tunnel");
+        let show_app = wide("Show App");
+        let show_logs = wide("Show Logs");
+        let about = wide("About");
+        let exit = wide("Exit");
 
-        AppendMenuW(menu, MF_STRING | MF_DISABLED | MF_GRAYED, 0, status.as_ptr());
+        AppendMenuW(
+            menu,
+            MF_STRING | MF_DISABLED | MF_GRAYED,
+            0,
+            sourcream.as_ptr(),
+        );
+        AppendMenuW(
+            menu,
+            disabled_when(SOURCREAM_STATUS.load(Ordering::Acquire) != READY),
+            CMD_PAUSE_SOURCREAM,
+            pause.as_ptr(),
+        );
+        AppendMenuW(
+            menu,
+            disabled_when(matches!(
+                SOURCREAM_STATUS.load(Ordering::Acquire),
+                RESTARTING | PAUSING
+            )),
+            CMD_RESTART_SOURCREAM,
+            restart_sourcream_text.as_ptr(),
+        );
         AppendMenuW(menu, MF_SEPARATOR, 0, null());
-        AppendMenuW(menu, MF_STRING, CMD_OPEN, open.as_ptr());
-        let start_flags = if STATUS.load(Ordering::Acquire) == OFFLINE {
-            MF_STRING
-        } else {
-            MF_STRING | MF_DISABLED | MF_GRAYED
-        };
-        AppendMenuW(menu, start_flags, CMD_START, start.as_ptr());
-        AppendMenuW(menu, MF_STRING, CMD_LOGS, logs.as_ptr());
+
+        AppendMenuW(
+            menu,
+            MF_STRING | MF_DISABLED | MF_GRAYED,
+            0,
+            tunnel.as_ptr(),
+        );
+        AppendMenuW(
+            menu,
+            disabled_when(TUNNEL_STATUS.load(Ordering::Acquire) == RESTARTING),
+            CMD_RESTART_TUNNEL,
+            restart_tunnel_text.as_ptr(),
+        );
         AppendMenuW(menu, MF_SEPARATOR, 0, null());
+
+        AppendMenuW(menu, MF_STRING, CMD_SHOW_APP, show_app.as_ptr());
+        AppendMenuW(menu, MF_STRING, CMD_SHOW_LOGS, show_logs.as_ptr());
+        AppendMenuW(menu, MF_SEPARATOR, 0, null());
+
+        AppendMenuW(menu, MF_STRING, CMD_ABOUT, about.as_ptr());
         AppendMenuW(menu, MF_STRING, CMD_EXIT, exit.as_ptr());
 
         let mut point = POINT { x: 0, y: 0 };
@@ -386,20 +575,55 @@ unsafe extern "system" fn window_proc(
         return 0;
     }
 
-    if message == WM_HEALTH_RESULT {
+    if message == WM_SOURCREAM_RESULT {
+        let current = SOURCREAM_STATUS.load(Ordering::Acquire);
         let status = if wparam == 1 {
-            ONLINE
-        } else if wparam == 2 {
-            OFFLINE
-        } else if STATUS.load(Ordering::Acquire) == STARTING
-            && now_ms().saturating_sub(STARTED_AT_MS.load(Ordering::Acquire)) < 15_000
+            READY
+        } else if wparam == 2 || current == PAUSING {
+            PAUSED
+        } else if current == RESTARTING
+            && now_ms().saturating_sub(SOURCREAM_ACTION_AT_MS.load(Ordering::Acquire)) < 15_000
         {
-            STARTING
+            RESTARTING
         } else {
-            OFFLINE
+            PAUSED
         };
-        STATUS.store(status, Ordering::Release);
+        SOURCREAM_STATUS.store(status, Ordering::Release);
         update_tray();
+        return 0;
+    }
+
+    if message == WM_TUNNEL_RESULT {
+        let current = TUNNEL_STATUS.load(Ordering::Acquire);
+        let status = if wparam == 1 {
+            READY
+        } else if current == RESTARTING
+            && now_ms().saturating_sub(TUNNEL_ACTION_AT_MS.load(Ordering::Acquire)) < 20_000
+        {
+            RESTARTING
+        } else {
+            NOT_READY
+        };
+        TUNNEL_STATUS.store(status, Ordering::Release);
+        update_tray();
+        return 0;
+    }
+
+    if message == WM_PAUSE_RESULT {
+        SOURCREAM_STATUS.store(PAUSED, Ordering::Release);
+        update_tray();
+        return 0;
+    }
+
+    if message == WM_ACTION_ERROR {
+        if let Some(slot) = ACTION_ERROR.get() {
+            if let Ok(mut pending) = slot.lock() {
+                if let Some(error) = pending.take() {
+                    show_error(&error);
+                }
+            }
+        }
+        request_health_check();
         return 0;
     }
 
@@ -416,15 +640,16 @@ unsafe extern "system" fn window_proc(
         }
         WM_COMMAND => {
             match wparam & 0xffff {
-                CMD_START => {
-                    if STATUS.load(Ordering::Acquire) == OFFLINE {
-                        if let Err(error) = start_server() {
-                            show_error(&error);
-                        }
+                CMD_PAUSE_SOURCREAM => pause_sourcream(),
+                CMD_RESTART_SOURCREAM => restart_sourcream(),
+                CMD_RESTART_TUNNEL => {
+                    if let Err(error) = restart_tunnel() {
+                        show_error(&error);
                     }
                 }
-                CMD_OPEN => open_url(),
-                CMD_LOGS => open_logs(),
+                CMD_SHOW_APP => open_url(),
+                CMD_SHOW_LOGS => open_logs(),
+                CMD_ABOUT => show_about(),
                 CMD_EXIT => {
                     remove_tray_icon();
                     PostQuitMessage(0);
@@ -512,7 +737,6 @@ fn run() -> Result<(), String> {
         }
     }
 
-    // Keep the mutex alive until the message loop exits.
     let _ = instance_mutex;
     Ok(())
 }
