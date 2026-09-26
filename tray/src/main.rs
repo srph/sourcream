@@ -32,7 +32,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 
 const APP_NAME: &str = "Sourcream Monitor";
-const SOURCREAM_HOST: &str = "127.0.0.1:25025";
+const SOURCREAM_HOST: &str = "127.0.0.1:10010";
 const SOURCREAM_HEALTH_PATH: &str = "/api/health";
 const CHECK_INTERVAL_MS: u32 = 10_000;
 const SOURCREAM_TIMEOUT_MS: u64 = 700;
@@ -203,7 +203,7 @@ fn launch_server() -> Result<(), String> {
     if !next.is_file() {
         return Err("Next.js is not installed. Run npm install first.".into());
     }
-    if !root.join(r".next\BUILD_ID").is_file() {
+    if !root.join(r".next-prod\BUILD_ID").is_file() {
         return Err("No production build was found. Run npm run build first.".into());
     }
 
@@ -219,7 +219,7 @@ fn launch_server() -> Result<(), String> {
 
     Command::new(node_path())
         .arg(next)
-        .args(["start", "--hostname", "0.0.0.0", "--port", "25025"])
+        .args(["start", "--hostname", "0.0.0.0", "--port", "10010"])
         .current_dir(root)
         .stdin(Stdio::null())
         .stdout(Stdio::from(log))
@@ -246,7 +246,7 @@ fn listener_pid() -> Result<Option<u32>, String> {
         let columns: Vec<_> = line.split_whitespace().collect();
         if columns.len() >= 5
             && columns[0].eq_ignore_ascii_case("TCP")
-            && columns[1].rsplit(':').next() == Some("25025")
+            && columns[1].rsplit(':').next() == Some("10010")
             && columns[3].eq_ignore_ascii_case("LISTENING")
         {
             if let Ok(pid) = columns[4].parse() {
@@ -378,7 +378,7 @@ fn restart_tunnel() -> Result<(), String> {
 
 fn open_url() {
     let _ = Command::new("explorer.exe")
-        .arg("http://localhost:25025")
+        .arg("http://localhost:10010")
         .creation_flags(CREATE_NO_WINDOW)
         .spawn();
 }

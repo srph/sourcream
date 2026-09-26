@@ -14,9 +14,9 @@ npm run build
 npm start
 ```
 
-Open `http://localhost:25025` on the PC. On the TV, open `http://<PC-LAN-IPv4>:25025` in its browser. Both devices must be on the same LAN with client isolation disabled. Wi-Fi TV and wired PC can communicate through the same router. If Windows Firewall prompts for Node, allow the private network. Keep the PC awake and the drive connected. No firewall or router rules are changed by these scripts.
+Open `http://localhost:10010` on the PC. On the TV, open `http://<PC-LAN-IPv4>:10010` in its browser. Both devices must be on the same LAN with client isolation disabled. Wi-Fi TV and wired PC can communicate through the same router. If Windows Firewall prompts for Node, allow the private network. Keep the PC awake and the drive connected. No firewall or router rules are changed by these scripts.
 
-`npm run dev` starts development on the same address; use the production build for TV playback. Changing an environment variable requires a restart. `.env` supports `MOVIES_ROOT`, `DATABASE_PATH`, `ASSETS_ROOT`, and optional `FFMPEG_PATH` / `FFPROBE_PATH` overrides. Fonts are served locally; playback needs no external service.
+`npm run dev` starts development at `http://localhost:10023` (or `http://<PC-LAN-IPv4>:10023` from another LAN device). Development uses `.next-dev`; `npm run build` and `npm start` use `.next-prod`. Both can run from this folder at once without overwriting each other's build files. They share the configured SQLite catalog and media assets. A port conflict causes startup to fail instead of selecting another port. Use the production server for TV playback. Changing an environment variable requires a restart. `.env` supports `MOVIES_ROOT`, `DATABASE_PATH`, `ASSETS_ROOT`, and optional `FFMPEG_PATH` / `FFPROBE_PATH` overrides. Fonts are served locally; playback needs no external service.
 
 ## Library maintenance
 

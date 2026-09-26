@@ -31,6 +31,10 @@ and Cloudflare Tunnel status sections, can pause or restart Sourcream, and can r
 elevated restart of the Windows `Cloudflared` service. Server output is written to
 `tray/sourcream-server.log` and replaced on each server start.
 
+The monitor manages the production server on port `10010` and checks for its build in
+`.next-prod`. Development on port `10023` is independent. Rebuild the monitor after changing
+its source so the installed executable uses the new port.
+
 The tray mark is a white IBM Plex Mono `S` inside a status circle:
 
 - Green: Sourcream and the tunnel are ready.

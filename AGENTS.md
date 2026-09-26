@@ -122,7 +122,7 @@ npm run db:generate
 npm run db:migrate
 ```
 
-The server binds to `0.0.0.0`; use `http://<PC-LAN-IPv4>:25025` on the TV. Keep the PC awake, keep the movie drive connected, and allow Node through Windows Firewall only on the private network if prompted. These scripts do not change firewall or router rules.
+Development binds to `0.0.0.0:10023` and writes `.next-dev`; production binds to `0.0.0.0:10010` and uses `.next-prod`. Use `http://<PC-LAN-IPv4>:10010` on the TV. Keep the PC awake, keep the movie drive connected, and allow Node through Windows Firewall only on the private network if prompted. These scripts do not change firewall or router rules.
 
 ## Testing
 
