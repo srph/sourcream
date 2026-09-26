@@ -31,6 +31,11 @@ and Cloudflare Tunnel status sections, can pause or restart Sourcream, and can r
 elevated restart of the Windows `Cloudflared` service. Server output is written to
 `tray/sourcream-server.log` and replaced on each server start.
 
+The tooltip shows the private LAN IPv4 URL and the menu shows its IP and port.
+Use **Copy LAN URL** to paste it into a TV or another device on the same network. The
+address is checked at startup and whenever you open the tray menu. If no suitable
+address is available, the menu shows that the IP is unavailable.
+
 The monitor manages the production server on port `10010` and checks for its build in
 `.next-prod`. Development on port `10023` is independent. Rebuild the monitor after changing
 its source so the installed executable uses the new port.

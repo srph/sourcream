@@ -29,7 +29,7 @@ npm run movie -- frames perfume-2006 --at 1600
 npm run movie -- list
 ```
 
-SQLite is the only catalog source of truth; there are no manifest files. The `add` command accepts verified metadata directly, refuses duplicate IDs unless `--replace` is supplied, validates the media, and writes the catalog transactionally. Repeat `--genre` and `--subtitle` for multiple values. A subtitle uses `relative-file|language|label`; subtitle input is UTF-8 SRT or WebVTT. Paths are relative to `MOVIES_ROOT`; the scripts resolve junctions and reject paths outside it. Subtitles are converted without changing originals, and `add` generates 320px player previews every 10 seconds. Obsolete generated subtitle files are retained for safety. See `docs/CATALOG.md` for the short workflow.
+SQLite is the only catalog source of truth; there are no manifest files. The `add` command accepts verified metadata directly, refuses duplicate IDs unless `--replace` is supplied, validates the media, and writes the catalog transactionally. Repeat `--genre` and `--subtitle` for multiple values. A subtitle uses `relative-file|language|label`; subtitle input is UTF-8 SRT or WebVTT. Paths are relative to `MOVIES_ROOT`; the scripts resolve junctions and reject paths outside it. Subtitles are converted without changing originals, and `add` generates 320px player previews every 10 seconds. Obsolete generated subtitle files are retained for safety. See `docs/CATALOG.md` for catalog, media, and playback guidance.
 
 The discoverable project skill is in `.agents/skills/sourcream-catalog/SKILL.md`.
 

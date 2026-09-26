@@ -3,7 +3,7 @@
 use std::ffi::c_void;
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpStream};
+use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -12,8 +12,16 @@ use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, AtomicU64, AtomicU8,
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use windows_sys::Win32::Foundation::{
-    GetLastError, ERROR_ALREADY_EXISTS, HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM,
+    GetLastError, ERROR_ALREADY_EXISTS, ERROR_BUFFER_OVERFLOW, HINSTANCE, HWND, LPARAM, LRESULT,
+    POINT, WPARAM,
 };
+use windows_sys::Win32::NetworkManagement::IpHelper::{
+    GetAdaptersAddresses, GAA_FLAG_INCLUDE_GATEWAYS, GAA_FLAG_SKIP_ANYCAST,
+    GAA_FLAG_SKIP_DNS_SERVER, GAA_FLAG_SKIP_MULTICAST, IF_TYPE_SOFTWARE_LOOPBACK, IF_TYPE_TUNNEL,
+    IP_ADAPTER_ADDRESSES_LH,
+};
+use windows_sys::Win32::NetworkManagement::Ndis::IfOperStatusUp;
+use windows_sys::Win32::Networking::WinSock::{AF_INET, SOCKADDR_IN};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Threading::{CreateMutexW, CREATE_NO_WINDOW};
 use windows_sys::Win32::UI::Shell::{
@@ -45,6 +53,7 @@ const WM_SOURCREAM_RESULT: u32 = WM_APP + 2;
 const WM_TUNNEL_RESULT: u32 = WM_APP + 3;
 const WM_PAUSE_RESULT: u32 = WM_APP + 4;
 const WM_ACTION_ERROR: u32 = WM_APP + 5;
+const WM_LAN_RESULT: u32 = WM_APP + 6;
 
 const CMD_PAUSE_SOURCREAM: usize = 1001;
 const CMD_RESTART_SOURCREAM: usize = 1002;
@@ -54,6 +63,7 @@ const CMD_SHOW_LOGS: usize = 1005;
 const CMD_ABOUT: usize = 1006;
 const CMD_EXIT: usize = 1007;
 const CMD_SHOW_APP_PUBLIC: usize = 1008;
+const CMD_COPY_LAN_URL: usize = 1009;
 
 const PAUSED: u8 = 0;
 const READY: u8 = 1;
@@ -69,6 +79,7 @@ static SOURCREAM_ACTION_AT_MS: AtomicU64 = AtomicU64::new(0);
 static TUNNEL_ACTION_AT_MS: AtomicU64 = AtomicU64::new(0);
 static TASKBAR_CREATED_MESSAGE: AtomicU32 = AtomicU32::new(0);
 static ACTION_ERROR: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+static LAN_IP: OnceLock<Mutex<Option<Ipv4Addr>>> = OnceLock::new();
 static READY_ICON: AtomicIsize = AtomicIsize::new(0);
 static BUSY_ICON: AtomicIsize = AtomicIsize::new(0);
 static PAUSED_ICON: AtomicIsize = AtomicIsize::new(0);
@@ -90,6 +101,86 @@ fn now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64
+}
+
+fn current_lan_ip() -> Option<Ipv4Addr> {
+    // GetAdaptersAddresses needs an aligned buffer and can report a larger size on retry.
+    let mut buffer = vec![0_u64; 2048];
+    let flags = GAA_FLAG_INCLUDE_GATEWAYS
+        | GAA_FLAG_SKIP_ANYCAST
+        | GAA_FLAG_SKIP_MULTICAST
+        | GAA_FLAG_SKIP_DNS_SERVER;
+    for _ in 0..3 {
+        let mut bytes = (buffer.len() * std::mem::size_of::<u64>()) as u32;
+        let result = unsafe {
+            GetAdaptersAddresses(
+                AF_INET as u32,
+                flags,
+                null(),
+                buffer.as_mut_ptr().cast::<IP_ADAPTER_ADDRESSES_LH>(),
+                &mut bytes,
+            )
+        };
+        if result == ERROR_BUFFER_OVERFLOW {
+            buffer.resize((bytes as usize).div_ceil(8), 0);
+            continue;
+        }
+        if result != 0 {
+            return None;
+        }
+
+        let mut adapter = buffer.as_ptr().cast::<IP_ADAPTER_ADDRESSES_LH>();
+        let mut best: Option<(bool, u32, Ipv4Addr)> = None;
+        while !adapter.is_null() {
+            let entry = unsafe { &*adapter };
+            if entry.OperStatus == IfOperStatusUp
+                && entry.IfType != IF_TYPE_SOFTWARE_LOOPBACK
+                && entry.IfType != IF_TYPE_TUNNEL
+            {
+                let mut address = entry.FirstUnicastAddress;
+                while !address.is_null() {
+                    let socket = unsafe { (*address).Address.lpSockaddr };
+                    if !socket.is_null() && unsafe { (*socket).sa_family } == AF_INET {
+                        let ipv4 = unsafe { &*(socket as *const SOCKADDR_IN) };
+                        let octets = unsafe { ipv4.sin_addr.S_un.S_un_b };
+                        let ip = Ipv4Addr::new(octets.s_b1, octets.s_b2, octets.s_b3, octets.s_b4);
+                        if ip.is_private() {
+                            let has_gateway = !entry.FirstGatewayAddress.is_null();
+                            let candidate = (has_gateway, entry.Ipv4Metric, ip);
+                            if best.is_none_or(|(gateway, metric, _)| {
+                                has_gateway > gateway
+                                    || (has_gateway == gateway && entry.Ipv4Metric < metric)
+                            }) {
+                                best = Some(candidate);
+                            }
+                        }
+                    }
+                    address = unsafe { (*address).Next };
+                }
+            }
+            adapter = entry.Next;
+        }
+        return best.map(|(_, _, ip)| ip);
+    }
+    None
+}
+
+fn cached_lan_ip() -> Option<Ipv4Addr> {
+    LAN_IP
+        .get()
+        .and_then(|slot| slot.lock().ok().and_then(|ip| *ip))
+}
+
+fn lan_url() -> Option<String> {
+    cached_lan_ip().map(|ip| format!("http://{ip}:10010"))
+}
+
+fn refresh_lan_ip() {
+    let ip = current_lan_ip();
+    let slot = LAN_IP.get_or_init(|| Mutex::new(None));
+    if let Ok(mut current) = slot.lock() {
+        *current = ip;
+    }
 }
 
 fn project_root() -> PathBuf {
@@ -195,6 +286,13 @@ fn request_health_check() {
         CHECK_IN_PROGRESS.store(false, Ordering::Release);
         post_window_message(WM_SOURCREAM_RESULT, usize::from(sourcream_ready));
         post_window_message(WM_TUNNEL_RESULT, usize::from(tunnel_ready));
+    });
+}
+
+fn request_lan_check() {
+    std::thread::spawn(|| {
+        refresh_lan_ip();
+        post_window_message(WM_LAN_RESULT, 0);
     });
 }
 
@@ -384,6 +482,23 @@ fn open_url(url: &str) {
         .spawn();
 }
 
+fn copy_lan_url() {
+    let Some(url) = lan_url() else { return };
+    let result = Command::new("clip.exe")
+        .stdin(Stdio::piped())
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .and_then(|mut child| {
+            if let Some(mut input) = child.stdin.take() {
+                input.write_all(url.as_bytes())?;
+            }
+            child.wait()
+        });
+    if !result.is_ok_and(|status| status.success()) {
+        show_error("Could not copy the LAN URL to the clipboard.");
+    }
+}
+
 fn open_logs() {
     let path = log_path();
     if !path.exists() {
@@ -487,7 +602,12 @@ fn tray_data(hwnd: HWND) -> NOTIFYICONDATAW {
     data.hIcon = unsafe { status_icon() };
     copy_wide(
         &mut data.szTip,
-        &format!("{} | {}", sourcream_label(), tunnel_label()),
+        &format!(
+            "{} | {} | {}",
+            sourcream_label(),
+            tunnel_label(),
+            lan_url().unwrap_or_else(|| "LAN IP unavailable".into())
+        ),
     );
     data
 }
@@ -530,6 +650,8 @@ fn disabled_when(disabled: bool) -> u32 {
 }
 
 fn show_menu(hwnd: HWND) {
+    refresh_lan_ip();
+    update_tray();
     unsafe {
         let menu: HMENU = CreatePopupMenu();
         if menu.is_null() {
@@ -542,6 +664,12 @@ fn show_menu(hwnd: HWND) {
         let tunnel = wide(tunnel_label());
         let restart_tunnel_text = wide("Restart Tunnel");
         let show_app_local = wide("Show App (Local)");
+        let lan_label = wide(
+            &cached_lan_ip()
+                .map(|ip| format!("LAN ({ip}:10010)"))
+                .unwrap_or_else(|| "LAN (IP unavailable)".into()),
+        );
+        let copy_lan_url = wide("Copy LAN URL");
         let show_app_public = wide("Show App (Public)");
         let show_logs = wide("Show Logs");
         let about = wide("About");
@@ -590,6 +718,18 @@ fn show_menu(hwnd: HWND) {
             MF_STRING,
             CMD_SHOW_APP_PUBLIC,
             show_app_public.as_ptr(),
+        );
+        AppendMenuW(
+            menu,
+            MF_STRING | MF_DISABLED | MF_GRAYED,
+            0,
+            lan_label.as_ptr(),
+        );
+        AppendMenuW(
+            menu,
+            disabled_when(lan_url().is_none()),
+            CMD_COPY_LAN_URL,
+            copy_lan_url.as_ptr(),
         );
         AppendMenuW(menu, MF_STRING, CMD_SHOW_LOGS, show_logs.as_ptr());
         AppendMenuW(menu, MF_SEPARATOR, 0, null());
@@ -679,6 +819,11 @@ unsafe extern "system" fn window_proc(
         return 0;
     }
 
+    if message == WM_LAN_RESULT {
+        update_tray();
+        return 0;
+    }
+
     let taskbar_created = TASKBAR_CREATED_MESSAGE.load(Ordering::Acquire);
     if taskbar_created != 0 && message == taskbar_created {
         add_tray_icon();
@@ -700,6 +845,7 @@ unsafe extern "system" fn window_proc(
                     }
                 }
                 CMD_SHOW_APP => open_url("http://localhost:10010"),
+                CMD_COPY_LAN_URL => copy_lan_url(),
                 CMD_SHOW_APP_PUBLIC => open_url("https://sourcream.kierb.com"),
                 CMD_SHOW_LOGS => open_logs(),
                 CMD_ABOUT => show_about(),
@@ -781,6 +927,7 @@ fn run() -> Result<(), String> {
         SetTimer(hwnd, TIMER_ID, CHECK_INTERVAL_MS, None);
     }
     request_health_check();
+    request_lan_check();
 
     let mut message: MSG = unsafe { std::mem::zeroed() };
     while unsafe { GetMessageW(&mut message, 0 as HWND, 0, 0) } > 0 {
