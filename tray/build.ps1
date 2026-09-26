@@ -28,6 +28,9 @@ try {
     New-Item -ItemType Directory -Force -Path $dist | Out-Null
     $executable = Join-Path $dist "sourcream-tray.exe"
     Copy-Item -Force (Join-Path $trayRoot "target\release\sourcream-tray.exe") $executable
+    $distAssets = Join-Path $dist "assets"
+    New-Item -ItemType Directory -Force -Path $distAssets | Out-Null
+    Copy-Item -Force (Join-Path $trayRoot "assets\status-*.ico") $distAssets
 
     & (Join-Path $trayRoot "install-startup.ps1")
     Start-Process -FilePath $executable -WorkingDirectory $trayRoot -WindowStyle Hidden

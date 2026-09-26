@@ -22,12 +22,13 @@ use windows_sys::Win32::UI::Shell::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DispatchMessageW,
-    GetCursorPos, GetMessageW, LoadIconW, MessageBoxW, PostMessageW, PostQuitMessage,
+    GetCursorPos, GetMessageW, LoadIconW, LoadImageW, MessageBoxW, PostMessageW, PostQuitMessage,
     RegisterClassW, RegisterWindowMessageW, SetForegroundWindow, SetTimer, TrackPopupMenu,
-    TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, HMENU, IDI_APPLICATION,
-    IDI_INFORMATION, IDI_WARNING, MB_ICONERROR, MB_ICONINFORMATION, MB_OK, MF_DISABLED, MF_GRAYED,
-    MF_SEPARATOR, MF_STRING, MSG, SW_HIDE, TPM_BOTTOMALIGN, TPM_RIGHTBUTTON, WM_APP, WM_COMMAND,
-    WM_CONTEXTMENU, WM_DESTROY, WM_LBUTTONUP, WM_RBUTTONUP, WM_TIMER, WNDCLASSW, WS_OVERLAPPED,
+    TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, HMENU, IDI_APPLICATION, IMAGE_ICON,
+    LR_DEFAULTSIZE, LR_LOADFROMFILE, MB_ICONERROR, MB_ICONINFORMATION, MB_OK, MF_DISABLED,
+    MF_GRAYED, MF_SEPARATOR, MF_STRING, MSG, SW_HIDE, TPM_BOTTOMALIGN, TPM_RIGHTBUTTON, WM_APP,
+    WM_COMMAND, WM_CONTEXTMENU, WM_DESTROY, WM_LBUTTONUP, WM_RBUTTONUP, WM_TIMER, WNDCLASSW,
+    WS_OVERLAPPED,
 };
 
 const APP_NAME: &str = "Sourcream Monitor";
@@ -67,6 +68,10 @@ static SOURCREAM_ACTION_AT_MS: AtomicU64 = AtomicU64::new(0);
 static TUNNEL_ACTION_AT_MS: AtomicU64 = AtomicU64::new(0);
 static TASKBAR_CREATED_MESSAGE: AtomicU32 = AtomicU32::new(0);
 static ACTION_ERROR: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+static READY_ICON: AtomicIsize = AtomicIsize::new(0);
+static BUSY_ICON: AtomicIsize = AtomicIsize::new(0);
+static PAUSED_ICON: AtomicIsize = AtomicIsize::new(0);
+static ERROR_ICON: AtomicIsize = AtomicIsize::new(0);
 
 fn wide(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(Some(0)).collect()
@@ -107,6 +112,21 @@ fn project_root() -> PathBuf {
 
 fn log_path() -> PathBuf {
     project_root().join(r"tray\sourcream-server.log")
+}
+
+fn icon_path(filename: &str) -> PathBuf {
+    if let Ok(executable) = std::env::current_exe() {
+        if let Some(directory) = executable.parent() {
+            let installed = directory.join("assets").join(filename);
+            if installed.is_file() {
+                return installed;
+            }
+        }
+    }
+
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("assets")
+        .join(filename)
 }
 
 fn node_path() -> PathBuf {
@@ -419,17 +439,45 @@ fn tunnel_label() -> &'static str {
     }
 }
 
+unsafe fn load_status_icon(
+    slot: &AtomicIsize,
+    filename: &str,
+) -> windows_sys::Win32::UI::WindowsAndMessaging::HICON {
+    let cached = slot.load(Ordering::Acquire);
+    if cached != 0 {
+        return cached as _;
+    }
+
+    let path = wide(&icon_path(filename).to_string_lossy());
+    let loaded = LoadImageW(
+        0 as HINSTANCE,
+        path.as_ptr(),
+        IMAGE_ICON,
+        0,
+        0,
+        LR_LOADFROMFILE | LR_DEFAULTSIZE,
+    ) as isize;
+    let icon = if loaded == 0 {
+        LoadIconW(0 as HINSTANCE, IDI_APPLICATION) as isize
+    } else {
+        loaded
+    };
+    slot.store(icon, Ordering::Release);
+    icon as _
+}
+
 unsafe fn status_icon() -> windows_sys::Win32::UI::WindowsAndMessaging::HICON {
     let sourcream = SOURCREAM_STATUS.load(Ordering::Acquire);
     let tunnel = TUNNEL_STATUS.load(Ordering::Acquire);
-    let icon = if sourcream == READY && tunnel == READY {
-        IDI_INFORMATION
-    } else if matches!(sourcream, RESTARTING | PAUSING) || tunnel == RESTARTING {
-        IDI_WARNING
+    if matches!(sourcream, RESTARTING | PAUSING) || tunnel == RESTARTING {
+        load_status_icon(&BUSY_ICON, "status-busy.ico")
+    } else if tunnel != READY {
+        load_status_icon(&ERROR_ICON, "status-error.ico")
+    } else if sourcream == READY {
+        load_status_icon(&READY_ICON, "status-ready.ico")
     } else {
-        IDI_APPLICATION
-    };
-    LoadIconW(0 as HINSTANCE, icon)
+        load_status_icon(&PAUSED_ICON, "status-paused.ico")
+    }
 }
 
 fn tray_data(hwnd: HWND) -> NOTIFYICONDATAW {
@@ -689,7 +737,7 @@ fn run() -> Result<(), String> {
         cbClsExtra: 0,
         cbWndExtra: 0,
         hInstance: module,
-        hIcon: unsafe { LoadIconW(0 as HINSTANCE, IDI_APPLICATION) },
+        hIcon: unsafe { load_status_icon(&READY_ICON, "status-ready.ico") },
         hCursor: null_mut(),
         hbrBackground: null_mut(),
         lpszMenuName: null(),

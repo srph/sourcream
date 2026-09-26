@@ -30,3 +30,14 @@ The monitor does not start Sourcream automatically. Its menu shows independent S
 and Cloudflare Tunnel status sections, can pause or restart Sourcream, and can request an
 elevated restart of the Windows `Cloudflared` service. Server output is written to
 `tray/sourcream-server.log` and replaced on each server start.
+
+The tray mark is a white IBM Plex Mono `S` inside a status circle:
+
+- Green: Sourcream and the tunnel are ready.
+- Amber: an action is in progress.
+- Gray: Sourcream is paused and the tunnel is ready.
+- Red: the Cloudflare Tunnel is not ready.
+
+The production `.ico` files are generated from the SVG masters under `tray/assets` and are
+copied beside the executable during `make build:tray`. IBM Plex Mono is bundled under the
+SIL Open Font License in `tray/assets/fonts/OFL.txt`.
