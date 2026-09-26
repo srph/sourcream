@@ -145,3 +145,7 @@ Run `npm run typecheck`, `npm test`, and `npm run build` for changes that touch 
 - SQLite `genres` is stored as JSON text; search currently uses SQLite `LIKE`, so `%` and `_` retain wildcard semantics.
 - Next route `params` and `searchParams` are async in this version; preserve that shape when editing App Router pages and handlers.
 - This is a trusted-LAN app without authentication. Do not describe it as WAN-safe or add WAN exposure as part of an unrelated change.
+
+## Git Commits
+
+Keep commits reasonably scoped: separate unrelated changes and distinct tasks/sessions, but group related work together. Don't over-optimize for atomic commits.

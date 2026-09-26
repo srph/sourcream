@@ -31,7 +31,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     WS_OVERLAPPED,
 };
 
-const APP_NAME: &str = "Sourcream Monitor";
+const APP_NAME: &str = "Sourcream";
 const SOURCREAM_HOST: &str = "127.0.0.1:10010";
 const SOURCREAM_HEALTH_PATH: &str = "/api/health";
 const CHECK_INTERVAL_MS: u32 = 10_000;
@@ -53,6 +53,7 @@ const CMD_SHOW_APP: usize = 1004;
 const CMD_SHOW_LOGS: usize = 1005;
 const CMD_ABOUT: usize = 1006;
 const CMD_EXIT: usize = 1007;
+const CMD_SHOW_APP_PUBLIC: usize = 1008;
 
 const PAUSED: u8 = 0;
 const READY: u8 = 1;
@@ -376,9 +377,9 @@ fn restart_tunnel() -> Result<(), String> {
     Ok(())
 }
 
-fn open_url() {
+fn open_url(url: &str) {
     let _ = Command::new("explorer.exe")
-        .arg("http://localhost:10010")
+        .arg(url)
         .creation_flags(CREATE_NO_WINDOW)
         .spawn();
 }
@@ -413,11 +414,7 @@ fn show_error(message: &str) {
 
 fn show_about() {
     show_message(
-        concat!(
-            "Sourcream Monitor ",
-            env!("CARGO_PKG_VERSION"),
-            "\n\nNative Windows monitor for Sourcream and Cloudflare Tunnel."
-        ),
+        "Sourcream\n\nWatch local media on your TV.",
         MB_ICONINFORMATION,
     );
 }
@@ -544,7 +541,8 @@ fn show_menu(hwnd: HWND) {
         let restart_sourcream_text = wide("Restart Sourcream");
         let tunnel = wide(tunnel_label());
         let restart_tunnel_text = wide("Restart Tunnel");
-        let show_app = wide("Show App");
+        let show_app_local = wide("Show App (Local)");
+        let show_app_public = wide("Show App (Public)");
         let show_logs = wide("Show Logs");
         let about = wide("About");
         let exit = wide("Exit");
@@ -586,7 +584,13 @@ fn show_menu(hwnd: HWND) {
         );
         AppendMenuW(menu, MF_SEPARATOR, 0, null());
 
-        AppendMenuW(menu, MF_STRING, CMD_SHOW_APP, show_app.as_ptr());
+        AppendMenuW(menu, MF_STRING, CMD_SHOW_APP, show_app_local.as_ptr());
+        AppendMenuW(
+            menu,
+            MF_STRING,
+            CMD_SHOW_APP_PUBLIC,
+            show_app_public.as_ptr(),
+        );
         AppendMenuW(menu, MF_STRING, CMD_SHOW_LOGS, show_logs.as_ptr());
         AppendMenuW(menu, MF_SEPARATOR, 0, null());
 
@@ -695,7 +699,8 @@ unsafe extern "system" fn window_proc(
                         show_error(&error);
                     }
                 }
-                CMD_SHOW_APP => open_url(),
+                CMD_SHOW_APP => open_url("http://localhost:10010"),
+                CMD_SHOW_APP_PUBLIC => open_url("https://sourcream.kierb.com"),
                 CMD_SHOW_LOGS => open_logs(),
                 CMD_ABOUT => show_about(),
                 CMD_EXIT => {
