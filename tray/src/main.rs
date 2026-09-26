@@ -712,13 +712,6 @@ fn show_menu(hwnd: HWND) {
         );
         AppendMenuW(menu, MF_SEPARATOR, 0, null());
 
-        AppendMenuW(menu, MF_STRING, CMD_SHOW_APP, show_app_local.as_ptr());
-        AppendMenuW(
-            menu,
-            MF_STRING,
-            CMD_SHOW_APP_PUBLIC,
-            show_app_public.as_ptr(),
-        );
         AppendMenuW(
             menu,
             MF_STRING | MF_DISABLED | MF_GRAYED,
@@ -730,6 +723,13 @@ fn show_menu(hwnd: HWND) {
             disabled_when(lan_url().is_none()),
             CMD_COPY_LAN_URL,
             copy_lan_url.as_ptr(),
+        );
+        AppendMenuW(menu, MF_STRING, CMD_SHOW_APP, show_app_local.as_ptr());
+        AppendMenuW(
+            menu,
+            MF_STRING,
+            CMD_SHOW_APP_PUBLIC,
+            show_app_public.as_ptr(),
         );
         AppendMenuW(menu, MF_STRING, CMD_SHOW_LOGS, show_logs.as_ptr());
         AppendMenuW(menu, MF_SEPARATOR, 0, null());
